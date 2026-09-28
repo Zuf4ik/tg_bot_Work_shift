@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"time"
 
+	"tg_bot/internal/repository"
 	"tg_bot/model"
 )
 
@@ -79,4 +81,50 @@ func CalculateSalary(shift model.Shift) (float64, error) {
 	}
 
 	return salary, nil
+}
+
+type ShiftService struct {
+	repo *repository.ShiftRepository
+}
+
+func NewShiftService(repo *repository.ShiftRepository) *ShiftService {
+	return &ShiftService{
+		repo: repo,
+	}
+}
+
+func (s *ShiftService) CreateShift(ctx context.Context, shift model.Shift) (int, error) {
+	_, err := CalculateHours(shift)
+	if err != nil {
+		return 0, err
+	}
+
+	_, err = CalculateSalary(shift)
+	if err != nil {
+		return 0, err
+	}
+
+	return s.repo.CreateShift(ctx, shift)
+}
+
+func (s *ShiftService) GetShifts(ctx context.Context) ([]model.Shift, error) {
+	return s.repo.GetShifts(ctx)
+}
+
+func (s *ShiftService) UpdateShift(ctx context.Context, id int, shift model.Shift) error {
+	_, err := CalculateHours(shift)
+	if err != nil {
+		return err
+	}
+
+	_, err = CalculateSalary(shift)
+	if err != nil {
+		return err
+	}
+
+	return s.repo.UpdateShift(ctx, id, shift)
+}
+
+func (s *ShiftService) DeleteShift(ctx context.Context, id int) error {
+	return s.repo.DeleteShift(ctx, id)
 }

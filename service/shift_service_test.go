@@ -1,6 +1,7 @@
 package service
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func TestCalculateSalaryNormalShift(t *testing.T) {
 
 	expected := 2000.0
 
-	if salary != expected {
+	if math.Abs(salary-expected) > 0.001 {
 		t.Errorf("ожидалось %.2f, получено %.2f", expected, salary)
 	}
 }
@@ -45,7 +46,7 @@ func TestCalculateSalaryNightShift(t *testing.T) {
 	// 8 часов × 250 × 1.3
 	expected := 2600.0
 
-	if salary != expected {
+	if math.Abs(salary-expected) > 0.001 {
 		t.Errorf("ожидалось %.2f, получено %.2f", expected, salary)
 	}
 }
@@ -73,7 +74,7 @@ func TestCalculateSalaryMixedShift(t *testing.T) {
 	// Итого: 1800
 	expected := 1800.0
 
-	if salary != expected {
+	if math.Abs(salary-expected) > 0.001 {
 		t.Errorf("ожидалось %.2f, получено %.2f", expected, salary)
 	}
 }
@@ -96,7 +97,7 @@ func TestCalculateSalaryWithBreak(t *testing.T) {
 	// 9 × 250 = 2250
 	expected := 2250.0
 
-	if salary != expected {
+	if math.Abs(salary-expected) > 0.001 {
 		t.Errorf("ожидалось %.2f, получено %.2f", expected, salary)
 	}
 }
