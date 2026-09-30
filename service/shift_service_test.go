@@ -151,3 +151,32 @@ func TestCalculateSalaryInvalidRate(t *testing.T) {
 		t.Error("ожидалась ошибка из-за отрицательной ставки")
 	}
 }
+
+func TestCalculateHoursInvalidTime(t *testing.T) {
+	shift := model.Shift{
+		StartTime: time.Date(2026, 9, 28, 20, 0, 0, 0, time.Local),
+		EndTime:   time.Date(2026, 9, 28, 18, 0, 0, 0, time.Local),
+		Break:     0,
+	}
+
+	_, err := CalculateHours(shift)
+
+	if err == nil {
+		t.Error("ожидалась ошибка из-за некорректного времени смены")
+	}
+}
+
+func TestCalculateSalaryNegativeBreak(t *testing.T) {
+	shift := model.Shift{
+		StartTime:  time.Date(2026, 9, 28, 10, 0, 0, 0, time.Local),
+		EndTime:    time.Date(2026, 9, 28, 18, 0, 0, 0, time.Local),
+		Break:      -1 * time.Hour,
+		HourlyRate: 250,
+	}
+
+	_, err := CalculateSalary(shift)
+
+	if err == nil {
+		t.Error("ожидалась ошибка из-за отрицательного перерыва")
+	}
+}
