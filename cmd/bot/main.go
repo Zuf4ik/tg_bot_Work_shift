@@ -5,6 +5,10 @@ import (
 
 	"tg_bot/config"
 	botservice "tg_bot/internal/bot"
+	"tg_bot/service"
+
+	"tg_bot/internal/database"
+	"tg_bot/internal/repository"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -21,6 +25,17 @@ func main() {
 
 	log.Printf("Бот подключен: @%s", api.Self.UserName)
 
-	bot := botservice.New(api)
+	db, err := database.Connect()
+	if err != nil {
+		log.Fatal("ошибка подключения к базе данных:", err)
+	}
+	defer db.Close()
+
+	userRepo := repository.NewUserRepository(db)
+
+	shiftRepo := repository.NewShiftRepository(db)
+	shiftService := service.NewShiftService(shiftRepo)
+
+	bot := botservice.New(api, userRepo, shiftService)
 	bot.Start()
 }

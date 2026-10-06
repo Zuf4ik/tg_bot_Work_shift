@@ -37,3 +37,20 @@ func (r *UserRepository) SetHourlyRate(
 
 	return err
 }
+
+func (r *UserRepository) GetHourlyRate(
+	ctx context.Context,
+	telegramID int64,
+) (float64, error) {
+	var rate float64
+
+	query := `
+		SELECT COALESCE(hourly_rate, 0)
+		FROM users
+		WHERE telegram_id = $1
+	`
+
+	err := r.db.QueryRow(ctx, query, telegramID).Scan(&rate)
+
+	return rate, err
+}

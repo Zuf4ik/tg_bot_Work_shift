@@ -23,19 +23,21 @@ func (r *ShiftRepository) CreateShift(ctx context.Context, shift model.Shift) (i
 	var id int
 
 	query := `
-		INSERT INTO shifts (
-			start_time,
-			end_time,
-			break_minutes,
-			hourly_rate
-		)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`
+    INSERT INTO shifts (
+        telegram_id,
+        start_time,
+        end_time,
+        break_minutes,
+        hourly_rate
+    )
+    VALUES ($1, $2, $3, $4, $5)
+    RETURNING id
+`
 
 	err := r.db.QueryRow(
 		ctx,
 		query,
+		shift.TelegramID,
 		shift.StartTime,
 		shift.EndTime,
 		int(shift.Break.Minutes()),
@@ -49,19 +51,24 @@ func (r *ShiftRepository) CreateShift(ctx context.Context, shift model.Shift) (i
 	return id, nil
 }
 
-func (r *ShiftRepository) GetShifts(ctx context.Context) ([]model.Shift, error) {
+func (r *ShiftRepository) GetShifts(
+	ctx context.Context,
+	telegramID int64,
+) ([]model.Shift, error) {
 	query := `
 		SELECT
 			id,
+			telegram_id,
 			start_time,
 			end_time,
 			break_minutes,
 			hourly_rate
 		FROM shifts
+		WHERE telegram_id = $1
 		ORDER BY start_time DESC
 	`
 
-	rows, err := r.db.Query(ctx, query)
+	rows, err := r.db.Query(ctx, query, telegramID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +82,7 @@ func (r *ShiftRepository) GetShifts(ctx context.Context) ([]model.Shift, error) 
 
 		err := rows.Scan(
 			&shift.ID,
+			&shift.TelegramID,
 			&shift.StartTime,
 			&shift.EndTime,
 			&breakMinutes,
@@ -96,13 +104,22 @@ func (r *ShiftRepository) GetShifts(ctx context.Context) ([]model.Shift, error) 
 	return shifts, nil
 }
 
-func (r *ShiftRepository) DeleteShift(ctx context.Context, id int) error {
+func (r *ShiftRepository) DeleteShift(
+	ctx context.Context,
+	id int,
+	telegramID int64,
+) error {
 	query := `
 		DELETE FROM shifts
-		WHERE id = $1
+		WHERE id = $1 AND telegram_id = $2
 	`
 
-	_, err := r.db.Exec(ctx, query, id)
+	_, err := r.db.Exec(
+		ctx,
+		query,
+		id,
+		telegramID,
+	)
 
 	return err
 }
@@ -129,4 +146,41 @@ func (r *ShiftRepository) UpdateShift(ctx context.Context, id int, shift model.S
 	)
 
 	return err
+}
+
+func (r *ShiftRepository) GetShiftByID(
+	ctx context.Context,
+	id int,
+	telegramID int64,
+) (*model.Shift, error) {
+	query := `
+		SELECT id, telegram_id, start_time, end_time, break_minutes, hourly_rate
+		FROM shifts
+		WHERE id = $1 AND telegram_id = $2
+	`
+
+	var shift model.Shift
+	var breakMinutes int
+
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		id,
+		telegramID,
+	).Scan(
+		&shift.ID,
+		&shift.TelegramID,
+		&shift.StartTime,
+		&shift.EndTime,
+		&breakMinutes,
+		&shift.HourlyRate,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	shift.Break = time.Duration(breakMinutes) * time.Minute
+
+	return &shift, nil
 }

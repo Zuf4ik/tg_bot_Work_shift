@@ -107,8 +107,19 @@ func (s *ShiftService) CreateShift(ctx context.Context, shift model.Shift) (int,
 	return s.repo.CreateShift(ctx, shift)
 }
 
-func (s *ShiftService) GetShifts(ctx context.Context) ([]model.Shift, error) {
-	return s.repo.GetShifts(ctx)
+func (s *ShiftService) GetShifts(
+	ctx context.Context,
+	telegramID int64,
+) ([]model.Shift, error) {
+	return s.repo.GetShifts(ctx, telegramID)
+}
+
+func (s *ShiftService) GetShiftByID(
+	ctx context.Context,
+	id int,
+	telegramID int64,
+) (*model.Shift, error) {
+	return s.repo.GetShiftByID(ctx, id, telegramID)
 }
 
 func (s *ShiftService) UpdateShift(ctx context.Context, id int, shift model.Shift) error {
@@ -125,6 +136,10 @@ func (s *ShiftService) UpdateShift(ctx context.Context, id int, shift model.Shif
 	return s.repo.UpdateShift(ctx, id, shift)
 }
 
-func (s *ShiftService) DeleteShift(ctx context.Context, id int) error {
-	return s.repo.DeleteShift(ctx, id)
+func (s *ShiftService) DeleteShift(
+	ctx context.Context,
+	id int,
+	telegramID int64,
+) error {
+	return s.repo.DeleteShift(ctx, id, telegramID)
 }
