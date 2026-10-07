@@ -74,7 +74,8 @@ func (r *ShiftRepository) GetShifts(
 	}
 	defer rows.Close()
 
-	var shifts []model.Shift
+	//var shifts []model.Shift
+	shifts := make([]model.Shift, 0)
 
 	for rows.Next() {
 		var shift model.Shift
