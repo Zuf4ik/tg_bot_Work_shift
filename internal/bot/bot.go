@@ -1042,56 +1042,28 @@ func (b *Bot) handleEditingEndTime(message *tgbotapi.Message) {
 		EndTime:    state.EndTime,
 	}
 
-	// Получаем текущую смену, чтобы не потерять
-	// существующий перерыв и ставку.
-	shifts, err := b.shiftService.GetShifts(
+	oldShift, err := b.shiftService.GetShiftByID(
 		context.Background(),
+		state.ShiftID,
 		message.Chat.ID,
 	)
+
 	if err != nil {
 		log.Println("ошибка получения смены:", err)
 
 		msg := tgbotapi.NewMessage(
 			message.Chat.ID,
-			"❌ Не удалось получить данные смены.",
+			"❌ Не удалось найти смену.",
 		)
+		msg.ReplyMarkup = mainKeyboard()
 		b.api.Send(msg)
 
 		delete(b.userStates, message.Chat.ID)
 		return
 	}
 
-	var oldShift *model.Shift
-
-	for _, existingShift := range shifts {
-		if existingShift.ID == state.ShiftID {
-			shift.Break = existingShift.Break
-			shift.HourlyRate = existingShift.HourlyRate
-			oldShift = &existingShift
-			break
-		}
-	}
-
-	if oldShift == nil {
-		oldShift, err := b.shiftService.GetShiftByID(
-			context.Background(),
-			state.ShiftID,
-			message.Chat.ID,
-		)
-		if err != nil {
-			msg := tgbotapi.NewMessage(
-				message.Chat.ID,
-				"❌ Не удалось найти смену.",
-			)
-			msg.ReplyMarkup = mainKeyboard()
-			b.api.Send(msg)
-			delete(b.userStates, message.Chat.ID)
-			return
-		}
-
-		shift.Break = oldShift.Break
-		shift.HourlyRate = oldShift.HourlyRate
-	}
+	shift.Break = oldShift.Break
+	shift.HourlyRate = oldShift.HourlyRate
 
 	// Проверяем новую смену перед сохранением.
 	if _, err := service.CalculateHours(shift); err != nil {
@@ -1180,37 +1152,18 @@ func (b *Bot) handleEditingBreak(message *tgbotapi.Message) {
 
 	state := b.userStates[message.Chat.ID]
 
-	shifts, err := b.shiftService.GetShifts(
+	shift, err := b.shiftService.GetShiftByID(
 		context.Background(),
+		state.ShiftID,
 		message.Chat.ID,
 	)
+
 	if err != nil {
-		log.Println("ошибка получения смен:", err)
+		log.Println("ошибка получения смены:", err)
 
 		msg := tgbotapi.NewMessage(
 			message.Chat.ID,
-			"❌ Не удалось получить данные смены.",
-		)
-		b.api.Send(msg)
-
-		delete(b.userStates, message.Chat.ID)
-		return
-	}
-
-	var shift *model.Shift
-
-	for _, existingShift := range shifts {
-		if existingShift.ID == state.ShiftID {
-			shiftCopy := existingShift
-			shift = &shiftCopy
-			break
-		}
-	}
-
-	if shift == nil {
-		msg := tgbotapi.NewMessage(
-			message.Chat.ID,
-			"❌ Смена не найдена.",
+			"❌ Не удалось найти смену.",
 		)
 		b.api.Send(msg)
 
@@ -1303,37 +1256,18 @@ func (b *Bot) handleEditingRate(message *tgbotapi.Message) {
 
 	state := b.userStates[message.Chat.ID]
 
-	shifts, err := b.shiftService.GetShifts(
+	shift, err := b.shiftService.GetShiftByID(
 		context.Background(),
+		state.ShiftID,
 		message.Chat.ID,
 	)
+
 	if err != nil {
-		log.Println("ошибка получения смен:", err)
+		log.Println("ошибка получения смены:", err)
 
 		msg := tgbotapi.NewMessage(
 			message.Chat.ID,
-			"❌ Не удалось получить данные смены.",
-		)
-		b.api.Send(msg)
-
-		delete(b.userStates, message.Chat.ID)
-		return
-	}
-
-	var shift *model.Shift
-
-	for _, existingShift := range shifts {
-		if existingShift.ID == state.ShiftID {
-			shiftCopy := existingShift
-			shift = &shiftCopy
-			break
-		}
-	}
-
-	if shift == nil {
-		msg := tgbotapi.NewMessage(
-			message.Chat.ID,
-			"❌ Смена не найдена.",
+			"❌ Не удалось найти смену.",
 		)
 		b.api.Send(msg)
 
