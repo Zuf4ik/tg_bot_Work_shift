@@ -60,32 +60,43 @@ func (b *Bot) Start() {
 		}
 
 		if update.Message.IsCommand() && update.Message.Command() == "start" {
+			delete(b.userStates, update.Message.Chat.ID)
 			b.handleStart(update.Message)
 			continue
 		}
 
 		if update.Message.Text == "➕ Добавить смену" {
+			delete(b.userStates, update.Message.Chat.ID)
 			b.handleAddShift(update.Message)
 			continue
 		}
 
 		if update.Message.Text == "📋 История" {
+			delete(b.userStates, update.Message.Chat.ID)
 			b.handleHistory(update.Message)
 			continue
 		}
 
 		if update.Message.Text == "💰 Указать ставку" {
+			delete(b.userStates, update.Message.Chat.ID)
 			b.handleSetRate(update.Message)
 			continue
 		}
 
 		if update.Message.Text == "✏️ Редактировать смену" {
+			delete(b.userStates, update.Message.Chat.ID)
 			b.handleEditShift(update.Message)
 			continue
 		}
 
 		if update.Message.Text == "🗑 Удалить смену" {
+			delete(b.userStates, update.Message.Chat.ID)
 			b.handleDeleteShift(update.Message)
+			continue
+		}
+		if update.Message.Text == "🏠 Главное меню" {
+			delete(b.userStates, update.Message.Chat.ID)
+			b.handleStart(update.Message)
 			continue
 		}
 
@@ -151,6 +162,9 @@ func mainKeyboard() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🗑 Удалить смену"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("🏠 Главное меню"),
 		),
 	)
 }
