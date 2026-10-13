@@ -22,10 +22,11 @@ type UserState struct {
 }
 
 type Bot struct {
-	api          *tgbotapi.BotAPI
-	userRepo     *repository.UserRepository
-	userStates   map[int64]*UserState
-	shiftService *service.ShiftService
+	api                  *tgbotapi.BotAPI
+	userRepo             *repository.UserRepository
+	userStates           map[int64]*UserState
+	shiftService         *service.ShiftService
+	activeInlineMessages map[int64]int
 }
 
 func New(
@@ -34,11 +35,42 @@ func New(
 	shiftService *service.ShiftService,
 ) *Bot {
 	return &Bot{
-		api:          api,
-		userRepo:     userRepo,
-		shiftService: shiftService,
-		userStates:   make(map[int64]*UserState),
+		api:                  api,
+		userRepo:             userRepo,
+		shiftService:         shiftService,
+		userStates:           make(map[int64]*UserState),
+		activeInlineMessages: make(map[int64]int),
 	}
+}
+
+// Убирает inline-клавиатуру и забывает активное сообщение чата.
+func (b *Bot) clearActiveInlineKeyboard(chatID int64) {
+	messageID, exists := b.activeInlineMessages[chatID]
+	if !exists {
+		return
+	}
+
+	markup := tgbotapi.InlineKeyboardMarkup{
+		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{},
+	}
+
+	edit := tgbotapi.NewEditMessageReplyMarkup(
+		chatID,
+		messageID,
+		markup,
+	)
+
+	if _, err := b.api.Request(edit); err != nil {
+		log.Println("не удалось убрать inline-клавиатуру:", err)
+	}
+
+	delete(b.activeInlineMessages, chatID)
+}
+
+// Завершает текущий сценарий перед переходом в меню.
+func (b *Bot) resetUserFlow(chatID int64) {
+	b.clearActiveInlineKeyboard(chatID)
+	delete(b.userStates, chatID)
 }
 
 func (b *Bot) Start() {
@@ -60,42 +92,42 @@ func (b *Bot) Start() {
 		}
 
 		if update.Message.IsCommand() && update.Message.Command() == "start" {
-			delete(b.userStates, update.Message.Chat.ID)
+			b.resetUserFlow(update.Message.Chat.ID)
 			b.handleStart(update.Message)
 			continue
 		}
 
 		if update.Message.Text == "➕ Добавить смену" {
-			delete(b.userStates, update.Message.Chat.ID)
+			b.resetUserFlow(update.Message.Chat.ID)
 			b.handleAddShift(update.Message)
 			continue
 		}
 
 		if update.Message.Text == "📋 История" {
-			delete(b.userStates, update.Message.Chat.ID)
+			b.resetUserFlow(update.Message.Chat.ID)
 			b.handleHistory(update.Message)
 			continue
 		}
 
 		if update.Message.Text == "💰 Указать ставку" {
-			delete(b.userStates, update.Message.Chat.ID)
+			b.resetUserFlow(update.Message.Chat.ID)
 			b.handleSetRate(update.Message)
 			continue
 		}
 
 		if update.Message.Text == "✏️ Редактировать смену" {
-			delete(b.userStates, update.Message.Chat.ID)
+			b.resetUserFlow(update.Message.Chat.ID)
 			b.handleEditShift(update.Message)
 			continue
 		}
 
 		if update.Message.Text == "🗑 Удалить смену" {
-			delete(b.userStates, update.Message.Chat.ID)
+			b.resetUserFlow(update.Message.Chat.ID)
 			b.handleDeleteShift(update.Message)
 			continue
 		}
 		if update.Message.Text == "🏠 Главное меню" {
-			delete(b.userStates, update.Message.Chat.ID)
+			b.resetUserFlow(update.Message.Chat.ID)
 			b.handleStart(update.Message)
 			continue
 		}
@@ -619,11 +651,35 @@ func (b *Bot) handleDeleteShift(message *tgbotapi.Message) {
 		InlineKeyboard: keyboard,
 	}
 
-	b.api.Send(msg)
+	sentMessage, err := b.api.Send(msg)
+	if err != nil {
+		log.Println("не удалось отправить список смен для удаления:", err)
+		return
+	}
+
+	b.activeInlineMessages[message.Chat.ID] = sentMessage.MessageID
 }
 
 func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	data := callback.Data
+
+	if callback.Message == nil {
+		answer := tgbotapi.NewCallback(callback.ID, "Сообщение недоступно")
+		b.api.Request(answer)
+		return
+	}
+
+	chatID := callback.Message.Chat.ID
+	activeMessageID, exists := b.activeInlineMessages[chatID]
+
+	if !exists || activeMessageID != callback.Message.MessageID {
+		answer := tgbotapi.NewCallback(
+			callback.ID,
+			"Действие устарело. Открой меню заново.",
+		)
+		b.api.Request(answer)
+		return
+	}
 
 	if strings.HasPrefix(data, "edit_shift:") {
 		shiftIDText := strings.TrimPrefix(data, "edit_shift:")
@@ -691,6 +747,8 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 			return
 		}
 
+		b.clearActiveInlineKeyboard(callback.Message.Chat.ID)
+
 		b.userStates[callback.Message.Chat.ID] = &UserState{
 			Step:    "editing_start_time",
 			ShiftID: shiftID,
@@ -718,6 +776,8 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		if err != nil {
 			return
 		}
+
+		b.clearActiveInlineKeyboard(callback.Message.Chat.ID)
 
 		b.userStates[callback.Message.Chat.ID] = &UserState{
 			Step:    "editing_break",
@@ -747,6 +807,8 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 			return
 		}
 
+		b.clearActiveInlineKeyboard(callback.Message.Chat.ID)
+
 		b.userStates[callback.Message.Chat.ID] = &UserState{
 			Step:    "editing_rate",
 			ShiftID: shiftID,
@@ -768,6 +830,7 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	}
 
 	if data == "cancel_edit" {
+		b.clearActiveInlineKeyboard(callback.Message.Chat.ID)
 		delete(b.userStates, callback.Message.Chat.ID)
 
 		edit := tgbotapi.NewEditMessageText(
@@ -853,6 +916,8 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 			return
 		}
 
+		b.clearActiveInlineKeyboard(callback.Message.Chat.ID)
+
 		edit := tgbotapi.NewEditMessageText(
 			callback.Message.Chat.ID,
 			callback.Message.MessageID,
@@ -874,20 +939,23 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	}
 
 	if data == "cancel_delete" {
+		b.clearActiveInlineKeyboard(callback.Message.Chat.ID)
+
 		edit := tgbotapi.NewEditMessageText(
 			callback.Message.Chat.ID,
 			callback.Message.MessageID,
 			"↩ Удаление отменено.",
 		)
 
-		b.api.Send(edit)
+		if _, err := b.api.Send(edit); err != nil {
+			log.Println("не удалось обновить сообщение об отмене удаления:", err)
+		}
 
-		answer := tgbotapi.NewCallback(
-			callback.ID,
-			"",
-		)
+		answer := tgbotapi.NewCallback(callback.ID, "")
+		if _, err := b.api.Request(answer); err != nil {
+			log.Println("не удалось обработать callback отмены удаления:", err)
+		}
 
-		b.api.Request(answer)
 		return
 	}
 }
@@ -951,7 +1019,13 @@ func (b *Bot) handleEditShift(message *tgbotapi.Message) {
 		InlineKeyboard: keyboard,
 	}
 
-	b.api.Send(msg)
+	sentMessage, err := b.api.Send(msg)
+	if err != nil {
+		log.Println("не удалось отправить список смен для редактирования:", err)
+		return
+	}
+
+	b.activeInlineMessages[message.Chat.ID] = sentMessage.MessageID
 }
 
 func (b *Bot) handleEditingStartTime(message *tgbotapi.Message) {
