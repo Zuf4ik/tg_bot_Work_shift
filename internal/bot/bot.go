@@ -147,6 +147,11 @@ func (b *Bot) Start() {
 			continue
 		}
 
+		if state.Step == "waiting_shift_date" {
+			b.handleShiftDate(update.Message)
+			continue
+		}
+
 		if state.Step == "waiting_start_time" {
 			b.handleStartTime(update.Message)
 			continue
@@ -188,30 +193,29 @@ func (b *Bot) Start() {
 		}
 	}
 }
+
 func mainKeyboard() tgbotapi.ReplyKeyboardMarkup {
-	return tgbotapi.NewReplyKeyboard(
+	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("➕ Добавить смену"),
-		),
-		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("💰 Указать ставку"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📋 История"),
-			//tgbotapi.NewKeyboardButton("📊 Статистика"),
 			tgbotapi.NewKeyboardButton("✏️ Редактировать смену"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🗑 Удалить смену"),
-		),
-		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🏠 Главное меню"),
 		),
 	)
+
+	keyboard.ResizeKeyboard = true
+	return keyboard
 }
 
 func (b *Bot) handleStart(message *tgbotapi.Message) {
-	text := "Привет! Я бот для учёта смен.\n\nВыбери действие:"
+	text := "Привет! Я бот для учёта смен.\n\nПеред добавлением первой смены сначала укажи свою часовую ставку через кнопку «💰 Указать ставку». Она нужна для расчёта зарплаты. После этого нажми «➕ Добавить смену».\n\nВыбери действие:"
 
 	msg := tgbotapi.NewMessage(
 		message.Chat.ID,
@@ -227,17 +231,55 @@ func (b *Bot) handleStart(message *tgbotapi.Message) {
 
 func (b *Bot) handleAddShift(message *tgbotapi.Message) {
 	b.userStates[message.Chat.ID] = &UserState{
-		Step: "waiting_start_time",
+		Step: "waiting_shift_date",
 	}
+
 	msg := tgbotapi.NewMessage(
 		message.Chat.ID,
-		"Добавление смены.\n\nВведи время начала смены в формате ЧЧ:ММ:",
+		"Добавление смены.\n\nВведи дату смены в формате ДД.ММ.ГГГГ.\nНапример: 14.10.2026",
 	)
 
 	if _, err := b.api.Send(msg); err != nil {
 		log.Println("ошибка отправки сообщения:", err)
 	}
+}
 
+// handleShiftDate сохраняет дату смены и переходит к вводу времени начала.
+func (b *Bot) handleShiftDate(message *tgbotapi.Message) {
+	shiftDate, err := time.ParseInLocation("02.01.2006", strings.TrimSpace(message.Text), time.Local)
+	if err != nil {
+		msg := tgbotapi.NewMessage(
+			message.Chat.ID,
+			"❌ Неверный формат даты.\n\nВведи дату в формате ДД.ММ.ГГГГ, например: 14.10.2026",
+		)
+		if _, sendErr := b.api.Send(msg); sendErr != nil {
+			log.Println("ошибка отправки сообщения:", sendErr)
+		}
+		return
+	}
+
+	state := b.userStates[message.Chat.ID]
+	if state == nil {
+		return
+	}
+
+	state.StartTime = time.Date(
+		shiftDate.Year(),
+		shiftDate.Month(),
+		shiftDate.Day(),
+		0, 0, 0, 0,
+		time.Local,
+	)
+	state.Step = "waiting_start_time"
+
+	msg := tgbotapi.NewMessage(
+		message.Chat.ID,
+		"📅 Дата смены: "+shiftDate.Format("02.01.2006")+
+			"\n\nТеперь введи время начала смены в формате ЧЧ:ММ, например: 10:00",
+	)
+	if _, sendErr := b.api.Send(msg); sendErr != nil {
+		log.Println("ошибка отправки сообщения:", sendErr)
+	}
 }
 
 func (b *Bot) handleHistory(message *tgbotapi.Message) {
@@ -396,13 +438,15 @@ func (b *Bot) handleStartTime(message *tgbotapi.Message) {
 	}
 
 	state := b.userStates[message.Chat.ID]
+	if state == nil {
+		return
+	}
 
-	now := time.Now()
-
+	// Используем дату, которую пользователь ввёл перед временем начала.
 	startTime = time.Date(
-		now.Year(),
-		now.Month(),
-		now.Day(),
+		state.StartTime.Year(),
+		state.StartTime.Month(),
+		state.StartTime.Day(),
 		startTime.Hour(),
 		startTime.Minute(),
 		0,
@@ -440,20 +484,21 @@ func (b *Bot) handleEndTime(message *tgbotapi.Message) {
 		return
 	}
 
-	now := time.Now()
+	state := b.userStates[message.Chat.ID]
+	if state == nil {
+		return
+	}
 
 	endTime = time.Date(
-		now.Year(),
-		now.Month(),
-		now.Day(),
+		state.StartTime.Year(),
+		state.StartTime.Month(),
+		state.StartTime.Day(),
 		endTime.Hour(),
 		endTime.Minute(),
 		0,
 		0,
-		time.Local,
+		state.StartTime.Location(),
 	)
-
-	state := b.userStates[message.Chat.ID]
 
 	if endTime.Before(state.StartTime) {
 		endTime = endTime.Add(24 * time.Hour)
@@ -562,7 +607,7 @@ func (b *Bot) handleBreakTime(message *tgbotapi.Message) {
 
 		msg := tgbotapi.NewMessage(
 			message.Chat.ID,
-			"❌ Не удалось сохранить смену в базе данных.",
+			"❌ Не удалось сохранить смену: "+err.Error(),
 		)
 
 		if _, err := b.api.Send(msg); err != nil {
@@ -576,11 +621,13 @@ func (b *Bot) handleBreakTime(message *tgbotapi.Message) {
 		message.Chat.ID,
 		fmt.Sprintf(
 			"✅ Смена рассчитана!\n\n"+
+				"📅 Дата: %s\n"+
 				"🕐 Время: %s — %s\n"+
 				"☕ Перерыв: %d мин.\n"+
 				"⏱ Часы: %.2f\n"+
 				"💰 Ставка: %.2f ₽/час\n"+
 				"💵 Зарплата: %.2f ₽",
+			shift.StartTime.Format("02.01.2006"),
 			shift.StartTime.Format("15:04"),
 			shift.EndTime.Format("15:04"),
 			breakMinutes,
@@ -1210,7 +1257,7 @@ func (b *Bot) handleEditingEndTime(message *tgbotapi.Message) {
 
 		msg := tgbotapi.NewMessage(
 			message.Chat.ID,
-			"❌ Не удалось обновить смену.",
+			"❌ Не удалось обновить смену: "+err.Error(),
 		)
 		b.api.Send(msg)
 
