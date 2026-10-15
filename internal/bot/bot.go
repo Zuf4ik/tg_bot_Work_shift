@@ -73,6 +73,15 @@ func (b *Bot) resetUserFlow(chatID int64) {
 	delete(b.userStates, chatID)
 }
 
+// Отвечает на нажатие inline-кнопки и записывает ошибку, если ответ не отправился.
+func (b *Bot) answerCallback(callbackID, text string) {
+	answer := tgbotapi.NewCallback(callbackID, text)
+
+	if _, err := b.api.Request(answer); err != nil {
+		log.Println("не удалось обработать callback:", err)
+	}
+}
+
 func (b *Bot) Start() {
 	log.Println("Telegram bot handler started")
 
@@ -685,7 +694,9 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		shiftIDText := strings.TrimPrefix(data, "edit_shift:")
 
 		shiftID, err := strconv.Atoi(shiftIDText)
-		if err != nil {
+		if err != nil || shiftID <= 0 {
+			log.Printf("некорректный ID смены в callback %q", data)
+			b.answerCallback(callback.ID, "❌ Некорректный номер смены.")
 			return
 		}
 
@@ -743,7 +754,9 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		shiftIDText := strings.TrimPrefix(data, "edit_time:")
 
 		shiftID, err := strconv.Atoi(shiftIDText)
-		if err != nil {
+		if err != nil || shiftID <= 0 {
+			log.Printf("некорректный ID смены в callback %q", data)
+			b.answerCallback(callback.ID, "❌ Некорректный номер смены.")
 			return
 		}
 
@@ -773,7 +786,9 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		shiftIDText := strings.TrimPrefix(data, "edit_break:")
 
 		shiftID, err := strconv.Atoi(shiftIDText)
-		if err != nil {
+		if err != nil || shiftID <= 0 {
+			log.Printf("некорректный ID смены в callback %q", data)
+			b.answerCallback(callback.ID, "❌ Некорректный номер смены.")
 			return
 		}
 
@@ -803,7 +818,9 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		shiftIDText := strings.TrimPrefix(data, "edit_rate:")
 
 		shiftID, err := strconv.Atoi(shiftIDText)
-		if err != nil {
+		if err != nil || shiftID <= 0 {
+			log.Printf("некорректный ID смены в callback %q", data)
+			b.answerCallback(callback.ID, "❌ Некорректный номер смены.")
 			return
 		}
 
@@ -851,7 +868,9 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		shiftIDText := strings.TrimPrefix(data, "confirm_delete:")
 
 		shiftID, err := strconv.Atoi(shiftIDText)
-		if err != nil {
+		if err != nil || shiftID <= 0 {
+			log.Printf("некорректный ID смены в callback %q", data)
+			b.answerCallback(callback.ID, "❌ Некорректный номер смены.")
 			return
 		}
 
@@ -894,7 +913,9 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		shiftIDText := strings.TrimPrefix(data, "delete_shift:")
 
 		shiftID, err := strconv.Atoi(shiftIDText)
-		if err != nil {
+		if err != nil || shiftID <= 0 {
+			log.Printf("некорректный ID смены в callback %q", data)
+			b.answerCallback(callback.ID, "❌ Некорректный номер смены.")
 			return
 		}
 
@@ -958,6 +979,11 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 
 		return
 	}
+
+	b.answerCallback(
+		callback.ID,
+		"Неизвестное действие. Открой меню заново.",
+	)
 }
 
 func (b *Bot) handleEditShift(message *tgbotapi.Message) {
