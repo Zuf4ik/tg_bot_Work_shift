@@ -180,3 +180,64 @@ func TestCalculateSalaryNegativeBreak(t *testing.T) {
 		t.Error("ожидалась ошибка из-за отрицательного перерыва")
 	}
 }
+
+func TestCalculateSalaryNightBoundary(t *testing.T) {
+	shift := model.Shift{
+		StartTime:  time.Date(2026, 9, 28, 21, 0, 0, 0, time.Local),
+		EndTime:    time.Date(2026, 9, 28, 23, 0, 0, 0, time.Local),
+		HourlyRate: 250,
+	}
+
+	salary, err := CalculateSalary(shift)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 21:00–22:00: 250 ₽; 22:00–23:00: 250 × 1.3 = 325 ₽.
+	expected := 575.0
+	if math.Abs(salary-expected) > 0.001 {
+		t.Errorf("ожидалось %.2f, получено %.2f", expected, salary)
+	}
+}
+
+func TestCalculateSalaryBreakEqualsShiftDuration(t *testing.T) {
+	shift := model.Shift{
+		StartTime:  time.Date(2026, 9, 28, 10, 0, 0, 0, time.Local),
+		EndTime:    time.Date(2026, 9, 28, 18, 0, 0, 0, time.Local),
+		Break:      8 * time.Hour,
+		HourlyRate: 250,
+	}
+
+	salary, err := CalculateSalary(shift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(salary) > 0.001 {
+		t.Errorf("ожидалась зарплата 0.00, получено %.2f", salary)
+	}
+}
+
+func TestCalculateSalaryBreakLongerThanShift(t *testing.T) {
+	shift := model.Shift{
+		StartTime:  time.Date(2026, 9, 28, 10, 0, 0, 0, time.Local),
+		EndTime:    time.Date(2026, 9, 28, 18, 0, 0, 0, time.Local),
+		Break:      9 * time.Hour,
+		HourlyRate: 250,
+	}
+
+	if _, err := CalculateSalary(shift); err == nil {
+		t.Error("ожидалась ошибка, если перерыв длиннее смены")
+	}
+}
+
+func TestCalculateSalaryEndBeforeStart(t *testing.T) {
+	shift := model.Shift{
+		StartTime:  time.Date(2026, 9, 28, 20, 0, 0, 0, time.Local),
+		EndTime:    time.Date(2026, 9, 28, 18, 0, 0, 0, time.Local),
+		HourlyRate: 250,
+	}
+
+	if _, err := CalculateSalary(shift); err == nil {
+		t.Error("ожидалась ошибка, если окончание смены раньше начала")
+	}
+}

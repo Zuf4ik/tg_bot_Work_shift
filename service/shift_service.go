@@ -93,6 +93,28 @@ func NewShiftService(repo *repository.ShiftRepository) *ShiftService {
 	}
 }
 
+// validateNoOverlap запрещает пересечение смен одного пользователя.
+// Смены, которые соприкасаются границами (например, 07:00–16:00 и 16:00–20:00), допустимы.
+func (s *ShiftService) validateNoOverlap(ctx context.Context, shift model.Shift, excludeID int) error {
+	shifts, err := s.repo.GetShifts(ctx, shift.TelegramID)
+	if err != nil {
+		return err
+	}
+
+	for _, existing := range shifts {
+		if excludeID != 0 && existing.ID == excludeID {
+			continue
+		}
+		// Два интервала пересекаются, если начало каждого раньше окончания другого.
+		if shift.StartTime.Before(existing.EndTime) && shift.EndTime.After(existing.StartTime) {
+			return errors.New("эта смена пересекается с уже сохранённой сменой " +
+				existing.StartTime.Format("02.01.2006 15:04") + "–" +
+				existing.EndTime.Format("02.01.2006 15:04"))
+		}
+	}
+	return nil
+}
+
 func (s *ShiftService) CreateShift(ctx context.Context, shift model.Shift) (int, error) {
 	_, err := CalculateHours(shift)
 	if err != nil {
@@ -101,6 +123,9 @@ func (s *ShiftService) CreateShift(ctx context.Context, shift model.Shift) (int,
 
 	_, err = CalculateSalary(shift)
 	if err != nil {
+		return 0, err
+	}
+	if err = s.validateNoOverlap(ctx, shift, 0); err != nil {
 		return 0, err
 	}
 
@@ -130,6 +155,9 @@ func (s *ShiftService) UpdateShift(ctx context.Context, id int, shift model.Shif
 
 	_, err = CalculateSalary(shift)
 	if err != nil {
+		return err
+	}
+	if err = s.validateNoOverlap(ctx, shift, id); err != nil {
 		return err
 	}
 
