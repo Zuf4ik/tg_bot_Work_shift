@@ -15,10 +15,11 @@ import (
 )
 
 type UserState struct {
-	ShiftID   int
-	Step      string
-	StartTime time.Time
-	EndTime   time.Time
+	ShiftID     int
+	Step        string
+	StartTime   time.Time
+	EndTime     time.Time
+	ReportStart time.Time
 }
 
 type Bot struct {
@@ -112,6 +113,32 @@ func (b *Bot) Start() {
 			continue
 		}
 
+		if update.Message.Text == "💵 Доход за период" {
+			b.resetUserFlow(update.Message.Chat.ID)
+			b.handleIncomeMenu(update.Message)
+			continue
+		}
+
+		if update.Message.Text == "📅 Текущий месяц" {
+			b.resetUserFlow(update.Message.Chat.ID)
+			b.handleCurrentMonthIncome(update.Message)
+			continue
+		}
+
+		if update.Message.Text == "↩ Прошлый месяц" {
+			b.resetUserFlow(update.Message.Chat.ID)
+			b.handlePreviousMonthIncome(update.Message)
+			continue
+		}
+
+		if update.Message.Text == "🗓 Свой период" {
+			b.userStates[update.Message.Chat.ID] = &UserState{Step: "waiting_income_start"}
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Введи начальную дату периода в формате ДД.ММ.ГГГГ. Например: 01.10.2026")
+			msg.ReplyMarkup = incomePeriodKeyboard()
+			b.api.Send(msg)
+			continue
+		}
+
 		if update.Message.Text == "📋 История" {
 			b.resetUserFlow(update.Message.Chat.ID)
 			b.handleHistory(update.Message)
@@ -144,6 +171,16 @@ func (b *Bot) Start() {
 		state, exists := b.userStates[update.Message.Chat.ID]
 
 		if !exists {
+			continue
+		}
+
+		if state.Step == "waiting_income_start" {
+			b.handleIncomeStartDate(update.Message)
+			continue
+		}
+
+		if state.Step == "waiting_income_end" {
+			b.handleIncomeEndDate(update.Message)
 			continue
 		}
 
@@ -202,16 +239,144 @@ func mainKeyboard() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📋 История"),
-			tgbotapi.NewKeyboardButton("✏️ Редактировать смену"),
+			tgbotapi.NewKeyboardButton("💵 Доход за период"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("✏️ Редактировать смену"),
 			tgbotapi.NewKeyboardButton("🗑 Удалить смену"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🏠 Главное меню"),
 		),
 	)
 
 	keyboard.ResizeKeyboard = true
 	return keyboard
+}
+
+func incomePeriodKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton("📅 Текущий месяц")),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton("↩ Прошлый месяц")),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton("🗓 Свой период")),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton("🏠 Главное меню")),
+	)
+	keyboard.ResizeKeyboard = true
+	return keyboard
+}
+
+func (b *Bot) handleIncomeMenu(message *tgbotapi.Message) {
+	delete(b.userStates, message.Chat.ID)
+	msg := tgbotapi.NewMessage(message.Chat.ID, "💵 За какой период показать доход?")
+	msg.ReplyMarkup = incomePeriodKeyboard()
+	if _, err := b.api.Send(msg); err != nil {
+		log.Println("не удалось показать выбор периода дохода:", err)
+	}
+}
+
+func (b *Bot) handleCurrentMonthIncome(message *tgbotapi.Message) {
+	now := time.Now().In(time.Local)
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+	end := start.AddDate(0, 1, 0).Add(-time.Nanosecond)
+	b.sendIncomeReport(message.Chat.ID, start, end)
+}
+
+func (b *Bot) handlePreviousMonthIncome(message *tgbotapi.Message) {
+	now := time.Now().In(time.Local)
+	thisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+	start := thisMonth.AddDate(0, -1, 0)
+	end := thisMonth.Add(-time.Nanosecond)
+	b.sendIncomeReport(message.Chat.ID, start, end)
+}
+
+func (b *Bot) handleIncomeStartDate(message *tgbotapi.Message) {
+	date, err := time.ParseInLocation("02.01.2006", strings.TrimSpace(message.Text), time.Local)
+	if err != nil {
+		b.api.Send(tgbotapi.NewMessage(message.Chat.ID, "❌ Не понял дату. Введи её в формате ДД.ММ.ГГГГ, например 01.10.2026."))
+		return
+	}
+	state := b.userStates[message.Chat.ID]
+	if state == nil {
+		return
+	}
+	state.ReportStart = time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.Local)
+	state.Step = "waiting_income_end"
+	b.api.Send(tgbotapi.NewMessage(message.Chat.ID, "Теперь введи конечную дату периода в формате ДД.ММ.ГГГГ. Например: 31.10.2026"))
+}
+
+func (b *Bot) handleIncomeEndDate(message *tgbotapi.Message) {
+	date, err := time.ParseInLocation("02.01.2006", strings.TrimSpace(message.Text), time.Local)
+	if err != nil {
+		b.api.Send(tgbotapi.NewMessage(message.Chat.ID, "❌ Не понял дату. Введи её в формате ДД.ММ.ГГГГ, например 31.10.2026."))
+		return
+	}
+	state := b.userStates[message.Chat.ID]
+	if state == nil {
+		return
+	}
+	end := time.Date(date.Year(), date.Month(), date.Day(), 23, 59, 59, int(time.Second-time.Nanosecond), time.Local)
+	start := state.ReportStart
+	if end.Before(start) {
+		b.api.Send(tgbotapi.NewMessage(message.Chat.ID, "❌ Конечная дата раньше начальной. Введи конечную дату ещё раз."))
+		return
+	}
+	delete(b.userStates, message.Chat.ID)
+	b.sendIncomeReport(message.Chat.ID, start, end)
+}
+
+func (b *Bot) sendIncomeReport(chatID int64, start, end time.Time) {
+
+	shifts, err := b.shiftService.GetShifts(context.Background(), chatID)
+	if err != nil {
+		log.Println("ошибка получения смен для отчёта:", err)
+		b.api.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось сформировать отчёт о доходах."))
+		return
+	}
+
+	now := time.Now()
+	var actualSalary, forecastSalary, actualHours, forecastHours float64
+	var actualCount, forecastCount int
+
+	for _, shift := range shifts {
+		// В отчёт попадают смены, дата начала которых входит в выбранный диапазон.
+
+		if shift.StartTime.Before(start) || shift.StartTime.After(end) {
+			continue
+		}
+		salary, salaryErr := service.CalculateSalary(shift)
+		hours, hoursErr := service.CalculateHours(shift)
+		if salaryErr != nil || hoursErr != nil {
+			log.Printf("пропущена смена #%d при расчёте отчёта: salary=%v hours=%v", shift.ID, salaryErr, hoursErr)
+			continue
+		}
+		if !shift.EndTime.After(now) {
+			actualSalary += salary
+			actualHours += hours
+			actualCount++
+		} else {
+			forecastSalary += salary
+			forecastHours += hours
+			forecastCount++
+		}
+	}
+
+	text := fmt.Sprintf(
+		"💵 Доход за период\n📅 %s — %s\n\n"+
+			"✅ Заработано (завершённые смены): %.2f ₽\n"+
+			"   Смен: %d · Часов: %.2f\n\n"+
+			"🔮 Ожидается (незавершённые/плановые смены): %.2f ₽\n"+
+			"   Смен: %d · Часов: %.2f\n\n"+
+			"📊 Итого с учётом прогноза: %.2f ₽",
+		start.Format("02.01.2006"), end.Format("02.01.2006"),
+		actualSalary, actualCount, actualHours,
+		forecastSalary, forecastCount, forecastHours,
+		actualSalary+forecastSalary,
+	)
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = mainKeyboard()
+	if _, err := b.api.Send(msg); err != nil {
+		log.Println("не удалось отправить отчёт о доходах:", err)
+	}
 }
 
 func (b *Bot) handleStart(message *tgbotapi.Message) {

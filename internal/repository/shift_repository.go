@@ -89,6 +89,10 @@ func (r *ShiftRepository) GetShifts(
 			&breakMinutes,
 			&shift.HourlyRate,
 		)
+
+		shift.StartTime = localTime(shift.StartTime)
+		shift.EndTime = localTime(shift.EndTime)
+
 		if err != nil {
 			return nil, err
 		}
@@ -184,4 +188,16 @@ func (r *ShiftRepository) GetShiftByID(
 	shift.Break = time.Duration(breakMinutes) * time.Minute
 
 	return &shift, nil
+}
+
+func localTime(t time.Time) time.Time {
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		return t
+	}
+	return time.Date(
+		t.Year(), t.Month(), t.Day(),
+		t.Hour(), t.Minute(), t.Second(), t.Nanosecond(),
+		loc,
+	)
 }
