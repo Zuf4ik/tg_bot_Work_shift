@@ -1415,6 +1415,7 @@ func (b *Bot) handleEditingEndTime(message *tgbotapi.Message) {
 	err = b.shiftService.UpdateShift(
 		context.Background(),
 		state.ShiftID,
+		message.From.ID,
 		shift,
 	)
 	if err != nil {
@@ -1520,6 +1521,7 @@ func (b *Bot) handleEditingBreak(message *tgbotapi.Message) {
 	err = b.shiftService.UpdateShift(
 		context.Background(),
 		state.ShiftID,
+		message.From.ID,
 		*shift,
 	)
 	if err != nil {
@@ -1624,6 +1626,7 @@ func (b *Bot) handleEditingRate(message *tgbotapi.Message) {
 	err = b.shiftService.UpdateShift(
 		context.Background(),
 		state.ShiftID,
+		message.From.ID,
 		*shift,
 	)
 	if err != nil {

@@ -2,9 +2,9 @@ package repository
 
 import (
 	"context"
-	"time"
-
+	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"time"
 
 	"tg_bot/model"
 )
@@ -129,18 +129,23 @@ func (r *ShiftRepository) DeleteShift(
 	return err
 }
 
-func (r *ShiftRepository) UpdateShift(ctx context.Context, id int, shift model.Shift) error {
+func (r *ShiftRepository) UpdateShift(
+	ctx context.Context,
+	id int,
+	telegramID int64,
+	shift model.Shift,
+) error {
 	query := `
-		UPDATE shifts
-		SET
-			start_time = $1,
-			end_time = $2,
-			break_minutes = $3,
-			hourly_rate = $4
-		WHERE id = $5
-	`
+        UPDATE shifts
+        SET
+            start_time = $1,
+            end_time = $2,
+            break_minutes = $3,
+            hourly_rate = $4
+        WHERE id = $5 AND telegram_id = $6
+    `
 
-	_, err := r.db.Exec(
+	result, err := r.db.Exec(
 		ctx,
 		query,
 		shift.StartTime,
@@ -148,9 +153,17 @@ func (r *ShiftRepository) UpdateShift(ctx context.Context, id int, shift model.S
 		int(shift.Break.Minutes()),
 		shift.HourlyRate,
 		id,
+		telegramID,
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("смена не найдена или не принадлежит пользователю")
+	}
+
+	return nil
 }
 
 func (r *ShiftRepository) GetShiftByID(

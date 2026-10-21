@@ -1,16 +1,21 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net"
+	"net/http"
+	"net/url"
+	"time"
 
 	"tg_bot/config"
 	botservice "tg_bot/internal/bot"
-	"tg_bot/service"
-
 	"tg_bot/internal/database"
 	"tg_bot/internal/repository"
+	"tg_bot/service"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"golang.org/x/net/proxy"
 )
 
 func main() {
@@ -18,7 +23,32 @@ func main() {
 		log.Fatal("ошибка загрузки .env:", err)
 	}
 
-	api, err := tgbotapi.NewBotAPI(config.GetBotToken())
+	proxyURL, err := url.Parse("socks5://217.77.1.145:1080")
+	if err != nil {
+		log.Fatal("ошибка адреса прокси:", err)
+	}
+
+	dialer, err := proxy.FromURL(proxyURL, &net.Dialer{
+		Timeout: 10 * time.Second,
+	})
+	if err != nil {
+		log.Fatal("ошибка настройки прокси:", err)
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			},
+		},
+		Timeout: 60 * time.Second,
+	}
+
+	api, err := tgbotapi.NewBotAPIWithClient(
+		config.GetBotToken(),
+		tgbotapi.APIEndpoint,
+		client,
+	)
 	if err != nil {
 		log.Fatal("ошибка создания Telegram-бота:", err)
 	}
@@ -32,7 +62,6 @@ func main() {
 	defer db.Close()
 
 	userRepo := repository.NewUserRepository(db)
-
 	shiftRepo := repository.NewShiftRepository(db)
 	shiftService := service.NewShiftService(shiftRepo)
 

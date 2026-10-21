@@ -175,6 +175,8 @@ func updateShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 
 		var req createShiftRequest
 
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
@@ -204,6 +206,7 @@ func updateShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 		if err := shiftService.UpdateShift(
 			r.Context(),
 			shiftID,
+			telegramID,
 			shift,
 		); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -222,6 +225,8 @@ func updateShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 func createShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createShiftRequest
+
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)

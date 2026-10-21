@@ -147,7 +147,12 @@ func (s *ShiftService) GetShiftByID(
 	return s.repo.GetShiftByID(ctx, id, telegramID)
 }
 
-func (s *ShiftService) UpdateShift(ctx context.Context, id int, shift model.Shift) error {
+func (s *ShiftService) UpdateShift(
+	ctx context.Context,
+	id int,
+	telegramID int64,
+	shift model.Shift,
+) error {
 	_, err := CalculateHours(shift)
 	if err != nil {
 		return err
@@ -157,11 +162,12 @@ func (s *ShiftService) UpdateShift(ctx context.Context, id int, shift model.Shif
 	if err != nil {
 		return err
 	}
+
 	if err = s.validateNoOverlap(ctx, shift, id); err != nil {
 		return err
 	}
 
-	return s.repo.UpdateShift(ctx, id, shift)
+	return s.repo.UpdateShift(ctx, id, telegramID, shift)
 }
 
 func (s *ShiftService) DeleteShift(
