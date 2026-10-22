@@ -32,6 +32,10 @@ func CalculateSalary(shift model.Shift) (float64, error) {
 		return 0, errors.New("ставка не может быть отрицательной")
 	}
 
+	if shift.HourlyRate > 10000 {
+		return 0, errors.New("почасовая ставка не может превышать 10000")
+	}
+
 	if shift.Break < 0 {
 		return 0, errors.New("перерыв не может быть отрицательным")
 	}

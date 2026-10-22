@@ -194,6 +194,12 @@ func updateShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 			return
 		}
 
+		if startTime.Year() < 2020 || startTime.Year() > 2036 ||
+			endTime.Year() < 2020 || endTime.Year() > 2036 {
+			http.Error(w, "year must be between 2020 and 2036", http.StatusBadRequest)
+			return
+		}
+
 		shift := model.Shift{
 			ID:         shiftID,
 			TelegramID: telegramID,
@@ -242,6 +248,12 @@ func createShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 		endTime, err := time.Parse("2006-01-02T15:04:05", req.EndTime)
 		if err != nil {
 			http.Error(w, "invalid end_time", http.StatusBadRequest)
+			return
+		}
+
+		if startTime.Year() < 2020 || startTime.Year() > 2036 ||
+			endTime.Year() < 2020 || endTime.Year() > 2036 {
+			http.Error(w, "year must be between 2020 and 2036", http.StatusBadRequest)
 			return
 		}
 

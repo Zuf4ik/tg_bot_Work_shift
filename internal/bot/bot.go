@@ -295,6 +295,13 @@ func (b *Bot) handleIncomeStartDate(message *tgbotapi.Message) {
 		b.api.Send(tgbotapi.NewMessage(message.Chat.ID, "❌ Не понял дату. Введи её в формате ДД.ММ.ГГГГ, например 01.10.2026."))
 		return
 	}
+	if date.Year() < 2020 || date.Year() > 2036 {
+		b.api.Send(tgbotapi.NewMessage(
+			message.Chat.ID,
+			"❌ Год должен быть в диапазоне от 2020 до 2036.",
+		))
+		return
+	}
 	state := b.userStates[message.Chat.ID]
 	if state == nil {
 		return
@@ -308,6 +315,13 @@ func (b *Bot) handleIncomeEndDate(message *tgbotapi.Message) {
 	date, err := time.ParseInLocation("02.01.2006", strings.TrimSpace(message.Text), time.Local)
 	if err != nil {
 		b.api.Send(tgbotapi.NewMessage(message.Chat.ID, "❌ Не понял дату. Введи её в формате ДД.ММ.ГГГГ, например 31.10.2026."))
+		return
+	}
+	if date.Year() < 2020 || date.Year() > 2036 {
+		b.api.Send(tgbotapi.NewMessage(
+			message.Chat.ID,
+			"❌ Год должен быть в диапазоне от 2020 до 2036.",
+		))
 		return
 	}
 	state := b.userStates[message.Chat.ID]
@@ -420,6 +434,13 @@ func (b *Bot) handleShiftDate(message *tgbotapi.Message) {
 		if _, sendErr := b.api.Send(msg); sendErr != nil {
 			log.Println("ошибка отправки сообщения:", sendErr)
 		}
+		return
+	}
+	if shiftDate.Year() < 2020 || shiftDate.Year() > 2036 {
+		b.api.Send(tgbotapi.NewMessage(
+			message.Chat.ID,
+			"❌ Год смены должен быть в диапазоне от 2020 до 2036.",
+		))
 		return
 	}
 

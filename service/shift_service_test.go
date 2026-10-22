@@ -241,3 +241,29 @@ func TestCalculateSalaryEndBeforeStart(t *testing.T) {
 		t.Error("ожидалась ошибка, если окончание смены раньше начала")
 	}
 }
+
+func TestCalculateSalaryRateAboveLimit(t *testing.T) {
+	shift := model.Shift{
+		StartTime:  time.Date(2026, 9, 28, 10, 0, 0, 0, time.Local),
+		EndTime:    time.Date(2026, 9, 28, 18, 0, 0, 0, time.Local),
+		Break:      0,
+		HourlyRate: 10001,
+	}
+
+	if _, err := CalculateSalary(shift); err == nil {
+		t.Error("ожидалась ошибка при ставке выше 10000")
+	}
+}
+
+func TestCalculateSalaryRateAtLimit(t *testing.T) {
+	shift := model.Shift{
+		StartTime:  time.Date(2026, 9, 28, 10, 0, 0, 0, time.Local),
+		EndTime:    time.Date(2026, 9, 28, 18, 0, 0, 0, time.Local),
+		Break:      0,
+		HourlyRate: 10000,
+	}
+
+	if _, err := CalculateSalary(shift); err != nil {
+		t.Fatalf("ставка 10000 должна допускаться, получена ошибка: %v", err)
+	}
+}
