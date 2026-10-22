@@ -436,11 +436,15 @@ func (b *Bot) handleShiftDate(message *tgbotapi.Message) {
 		}
 		return
 	}
+
 	if shiftDate.Year() < 2020 || shiftDate.Year() > 2036 {
-		b.api.Send(tgbotapi.NewMessage(
+		msg := tgbotapi.NewMessage(
 			message.Chat.ID,
 			"❌ Год смены должен быть в диапазоне от 2020 до 2036.",
-		))
+		)
+		if _, sendErr := b.api.Send(msg); sendErr != nil {
+			log.Println("ошибка отправки сообщения:", sendErr)
+		}
 		return
 	}
 
@@ -556,11 +560,12 @@ func (b *Bot) handleSetRate(message *tgbotapi.Message) {
 }
 
 func (b *Bot) handleHourlyRate(message *tgbotapi.Message) {
-	rate, err := strconv.ParseFloat(message.Text, 64)
-	if err != nil || rate <= 0 {
+
+	rate, err := strconv.ParseFloat(strings.TrimSpace(message.Text), 64)
+	if err != nil || rate <= 0 || rate > 10000 {
 		msg := tgbotapi.NewMessage(
 			message.Chat.ID,
-			"❌ Неверная ставка.\n\nВведи положительное число, например: 250",
+			"❌ Неверная ставка. Введи сумму больше 0 и не более 10000 ₽/час.",
 		)
 
 		if _, err := b.api.Send(msg); err != nil {
@@ -1593,8 +1598,8 @@ func (b *Bot) handleEditingBreak(message *tgbotapi.Message) {
 }
 
 func (b *Bot) handleEditingRate(message *tgbotapi.Message) {
-	rate, err := strconv.ParseFloat(message.Text, 64)
-	if err != nil || rate <= 0 {
+	rate, err := strconv.ParseFloat(strings.TrimSpace(message.Text), 64)
+	if err != nil || rate <= 0 || rate > 10000 {
 		msg := tgbotapi.NewMessage(
 			message.Chat.ID,
 			"❌ Неверная ставка.\n\nВведи положительное число, например: 300",
