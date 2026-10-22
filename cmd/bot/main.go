@@ -23,7 +23,7 @@ func main() {
 		log.Fatal("ошибка загрузки .env:", err)
 	}
 
-	proxyURL, err := url.Parse("socks5://217.77.1.145:1080")
+	proxyURL, err := url.Parse("socks5://127.0.0.1:10808")
 	if err != nil {
 		log.Fatal("ошибка адреса прокси:", err)
 	}
