@@ -62,8 +62,8 @@ func CalculateSalary(shift model.Shift) (float64, error) {
 
 		hour := current.Hour()
 
-		// Ночное время: 22:00–06:00.
-		isNight := hour >= 22 || hour < 6
+		// Ночное время: 22:00–07:00.
+		isNight := hour >= 22 || hour < 7
 
 		coefficient := 1.0
 

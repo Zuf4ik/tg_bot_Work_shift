@@ -29,22 +29,20 @@ func TestCalculateSalaryNormalShift(t *testing.T) {
 	}
 }
 
-func TestCalculateSalaryNightShift(t *testing.T) {
+func TestCalculateSalaryNightUntilSeven(t *testing.T) {
 	shift := model.Shift{
-		StartTime:  time.Date(2026, 9, 28, 22, 0, 0, 0, time.Local),
-		EndTime:    time.Date(2026, 9, 29, 6, 0, 0, 0, time.Local),
+		StartTime:  time.Date(2026, 9, 28, 6, 0, 0, 0, time.Local),
+		EndTime:    time.Date(2026, 9, 28, 7, 0, 0, 0, time.Local),
 		Break:      0,
 		HourlyRate: 250,
 	}
 
 	salary, err := CalculateSalary(shift)
-
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// 8 часов × 250 × 1.3
-	expected := 2600.0
+	expected := 325.0 // 1 час × 250 ₽ × 1.3
 
 	if math.Abs(salary-expected) > 0.001 {
 		t.Errorf("ожидалось %.2f, получено %.2f", expected, salary)
