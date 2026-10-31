@@ -63,8 +63,14 @@ func main() {
 
 	userRepo := repository.NewUserRepository(db)
 	shiftRepo := repository.NewShiftRepository(db)
-	shiftService := service.NewShiftService(shiftRepo)
+	calendarRepo := repository.NewCalendarRepository(db)
 
-	bot := botservice.New(api, userRepo, shiftService)
+	shiftService := service.NewShiftService(shiftRepo)
+	salaryService := service.NewSalaryService(calendarRepo)
+
+	// Пока SalaryService не подключён к обработчикам Telegram.
+	// На следующем этапе передадим его в botservice.New.
+
+	bot := botservice.New(api, userRepo, shiftService, salaryService)
 	bot.Start()
 }

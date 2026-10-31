@@ -27,6 +27,7 @@ type Bot struct {
 	userRepo             *repository.UserRepository
 	userStates           map[int64]*UserState
 	shiftService         *service.ShiftService
+	salaryService        *service.SalaryService
 	activeInlineMessages map[int64]int
 }
 
@@ -34,11 +35,13 @@ func New(
 	api *tgbotapi.BotAPI,
 	userRepo *repository.UserRepository,
 	shiftService *service.ShiftService,
+	salaryService *service.SalaryService,
 ) *Bot {
 	return &Bot{
 		api:                  api,
 		userRepo:             userRepo,
 		shiftService:         shiftService,
+		salaryService:        salaryService,
 		userStates:           make(map[int64]*UserState),
 		activeInlineMessages: make(map[int64]int),
 	}
@@ -386,6 +389,71 @@ func (b *Bot) sendIncomeReport(chatID int64, start, end time.Time) {
 		forecastSalary, forecastCount, forecastHours,
 		actualSalary+forecastSalary,
 	)
+
+	// Премию показываем только для полного календарного месяца.
+	monthStart := time.Date(
+		start.Year(), start.Month(), 1,
+		0, 0, 0, 0, start.Location(),
+	)
+	nextMonth := monthStart.AddDate(0, 1, 0)
+
+	if start.Equal(monthStart) &&
+		!end.Before(nextMonth.Add(-time.Second)) &&
+		end.Before(nextMonth) {
+
+		var completedShifts []model.Shift
+		var allMonthShifts []model.Shift
+
+		for _, shift := range shifts {
+			if shift.StartTime.Before(monthStart) ||
+				!shift.StartTime.Before(nextMonth) {
+				continue
+			}
+
+			allMonthShifts = append(allMonthShifts, shift)
+
+			if !shift.EndTime.After(now) {
+				completedShifts = append(completedShifts, shift)
+			}
+		}
+
+		actualBonus, actualErr := b.salaryService.CalculateBonusFromShifts(
+			context.Background(),
+			monthStart.Year(),
+			monthStart.Month(),
+			completedShifts,
+		)
+
+		forecastBonus, forecastErr := b.salaryService.CalculateBonusFromShifts(
+			context.Background(),
+			monthStart.Year(),
+			monthStart.Month(),
+			allMonthShifts,
+		)
+
+		if actualErr != nil || forecastErr != nil {
+			log.Printf(
+				"ошибка расчёта месячной премии: actual=%v forecast=%v",
+				actualErr, forecastErr,
+			)
+			text += "\n\n⚠️ Не удалось рассчитать месячную премию."
+		} else {
+			text += fmt.Sprintf(
+				"\n\n📊 Месячная статистика\n"+
+					"⏱ Отработано: %.2f ч\n"+
+					"📅 Норма: %.2f ч\n"+
+					"⏳ До нормы: %.2f ч\n"+
+					"💎 Премия за завершённые смены: %.2f ₽\n"+
+					"🔮 Премия с учётом плана: %.2f ₽",
+				actualBonus.WorkedHours,
+				actualBonus.NormHours,
+				actualBonus.Remaining,
+				actualBonus.Bonus,
+				forecastBonus.Bonus,
+			)
+		}
+	}
+
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = mainKeyboard()
 	if _, err := b.api.Send(msg); err != nil {
