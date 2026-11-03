@@ -541,38 +541,46 @@ func (b *Bot) handleShiftDate(message *tgbotapi.Message) {
 }
 
 func (b *Bot) handleHistory(message *tgbotapi.Message) {
-	ctx := context.Background()
+	b.sendMonthlyHistory(message.Chat.ID, time.Now())
+}
 
+func (b *Bot) buildMonthlyHistory(
+	chatID int64,
+	month time.Time,
+) (string, tgbotapi.InlineKeyboardMarkup, error) {
 	shifts, err := b.shiftService.GetShifts(
-		ctx,
-		message.Chat.ID,
+		context.Background(),
+		chatID,
+	)
+	if err != nil {
+		return "", tgbotapi.InlineKeyboardMarkup{}, err
+	}
+
+	month = monthStart(month)
+
+	monthNames := []string{
+		"Январь", "Февраль", "Март", "Апрель",
+		"Май", "Июнь", "Июль", "Август",
+		"Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+	}
+
+	var text strings.Builder
+
+	fmt.Fprintf(
+		&text,
+		"📋 История смен\n📅 %s %d\n\n",
+		monthNames[int(month.Month())-1],
+		month.Year(),
 	)
 
-	if err != nil {
-		log.Println("ошибка получения истории:", err)
+	var totalHours, totalSalary float64
+	count := 0
 
-		msg := tgbotapi.NewMessage(
-			message.Chat.ID,
-			"❌ Не удалось получить историю смен.",
-		)
+	for _, shift := range shifts {
+		if !shiftInMonth(shift.StartTime, month) {
+			continue
+		}
 
-		b.api.Send(msg)
-		return
-	}
-
-	if len(shifts) == 0 {
-		msg := tgbotapi.NewMessage(
-			message.Chat.ID,
-			"📋 История смен пока пуста.",
-		)
-
-		b.api.Send(msg)
-		return
-	}
-
-	text := "📋 История смен:\n\n"
-
-	for i, shift := range shifts {
 		hours, err := service.CalculateHours(shift)
 		if err != nil {
 			continue
@@ -583,13 +591,18 @@ func (b *Bot) handleHistory(message *tgbotapi.Message) {
 			continue
 		}
 
-		text += fmt.Sprintf(
+		count++
+		totalHours += hours
+		totalSalary += salary
+
+		fmt.Fprintf(
+			&text,
 			"%d. 📅 %s\n"+
 				"🕐 %s — %s\n"+
 				"☕ Перерыв: %d мин.\n"+
 				"⏱ %.2f ч.\n"+
 				"💰 %.2f ₽\n\n",
-			i+1,
+			count,
 			shift.StartTime.Format("02.01.2006"),
 			shift.StartTime.Format("15:04"),
 			shift.EndTime.Format("15:04"),
@@ -599,12 +612,81 @@ func (b *Bot) handleHistory(message *tgbotapi.Message) {
 		)
 	}
 
-	msg := tgbotapi.NewMessage(
-		message.Chat.ID,
-		text,
+	if count == 0 {
+		text.WriteString("За этот месяц смен пока нет.\n\n")
+	}
+
+	fmt.Fprintf(
+		&text,
+		"━━━━━━━━━━━━━━\n"+
+			"📊 Всего смен: %d\n"+
+			"⏱ Всего часов: %.2f\n"+
+			"💵 Заработок: %.2f ₽",
+		count,
+		totalHours,
+		totalSalary,
 	)
 
-	b.api.Send(msg)
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(
+				"◀️ Предыдущий",
+				"history_prev:"+month.Format("2006-01"),
+			),
+			tgbotapi.NewInlineKeyboardButtonData(
+				"Следующий ▶️",
+				"history_next:"+month.Format("2006-01"),
+			),
+		),
+	)
+
+	return text.String(), keyboard, nil
+}
+
+func (b *Bot) sendMonthlyHistory(chatID int64, month time.Time) {
+	text, keyboard, err := b.buildMonthlyHistory(chatID, month)
+	if err != nil {
+		log.Println("ошибка получения истории:", err)
+		b.api.Send(tgbotapi.NewMessage(
+			chatID,
+			"❌ Не удалось получить историю смен.",
+		))
+		return
+	}
+
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = keyboard
+
+	sent, err := b.api.Send(msg)
+	if err != nil {
+		log.Println("ошибка отправки истории:", err)
+		return
+	}
+
+	b.activeInlineMessages[chatID] = sent.MessageID
+}
+
+func (b *Bot) updateMonthlyHistory(
+	chatID int64,
+	messageID int,
+	month time.Time,
+) {
+	text, keyboard, err := b.buildMonthlyHistory(chatID, month)
+	if err != nil {
+		log.Println("ошибка получения истории:", err)
+		return
+	}
+
+	edit := tgbotapi.NewEditMessageText(
+		chatID,
+		messageID,
+		text,
+	)
+	edit.ReplyMarkup = &keyboard
+
+	if _, err := b.api.Send(edit); err != nil {
+		log.Println("ошибка обновления истории:", err)
+	}
 }
 
 func (b *Bot) handleSetRate(message *tgbotapi.Message) {
@@ -977,6 +1059,55 @@ func (b *Bot) handleDeleteShift(message *tgbotapi.Message) {
 
 func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	data := callback.Data
+
+	if strings.HasPrefix(data, "history_prev:") ||
+		strings.HasPrefix(data, "history_next:") {
+
+		if callback.Message == nil {
+			b.answerCallback(callback.ID, "Сообщение недоступно")
+			return
+		}
+
+		chatID := callback.Message.Chat.ID
+
+		activeID, exists := b.activeInlineMessages[chatID]
+		if !exists || activeID != callback.Message.MessageID {
+			b.answerCallback(callback.ID, "История устарела. Открой её заново.")
+			return
+		}
+
+		parts := strings.SplitN(data, ":", 2)
+		if len(parts) != 2 {
+			b.answerCallback(callback.ID, "Некорректная дата")
+			return
+		}
+
+		month, err := time.Parse("2006-01", parts[1])
+		if err != nil {
+			b.answerCallback(callback.ID, "Некорректная дата")
+			return
+		}
+
+		if parts[0] == "history_prev" {
+			month = month.AddDate(0, -1, 0)
+		} else {
+			month = month.AddDate(0, 1, 0)
+		}
+
+		if month.Year() < 2020 || month.Year() > 2036 {
+			b.answerCallback(callback.ID, "Месяц вне допустимого диапазона")
+			return
+		}
+
+		b.answerCallback(callback.ID, "")
+
+		b.updateMonthlyHistory(
+			chatID,
+			callback.Message.MessageID,
+			month,
+		)
+		return
+	}
 
 	if callback.Message == nil {
 		answer := tgbotapi.NewCallback(callback.ID, "Сообщение недоступно")
