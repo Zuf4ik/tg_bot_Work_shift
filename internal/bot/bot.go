@@ -28,6 +28,7 @@ type Bot struct {
 	userStates           map[int64]*UserState
 	shiftService         *service.ShiftService
 	salaryService        *service.SalaryService
+	extraRepo            *repository.ExtraRepository
 	activeInlineMessages map[int64]int
 }
 
@@ -36,12 +37,14 @@ func New(
 	userRepo *repository.UserRepository,
 	shiftService *service.ShiftService,
 	salaryService *service.SalaryService,
+	extraRepo *repository.ExtraRepository,
 ) *Bot {
 	return &Bot{
 		api:                  api,
 		userRepo:             userRepo,
 		shiftService:         shiftService,
 		salaryService:        salaryService,
+		extraRepo:            extraRepo,
 		userStates:           make(map[int64]*UserState),
 		activeInlineMessages: make(map[int64]int),
 	}
@@ -113,6 +116,12 @@ func (b *Bot) Start() {
 		if update.Message.Text == "➕ Добавить смену" {
 			b.resetUserFlow(update.Message.Chat.ID)
 			b.handleAddShift(update.Message)
+			continue
+		}
+
+		if update.Message.Text == "📦 Дополнительные работы" {
+			b.resetUserFlow(update.Message.Chat.ID)
+			b.handleExtrasMenu(update.Message)
 			continue
 		}
 
@@ -245,6 +254,9 @@ func mainKeyboard() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton("💵 Доход за период"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("📦 Дополнительные работы"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("✏️ Редактировать смену"),
 			tgbotapi.NewKeyboardButton("🗑 Удалить смену"),
 		),
@@ -352,6 +364,7 @@ func (b *Bot) sendIncomeReport(chatID int64, start, end time.Time) {
 
 	now := time.Now()
 	var actualSalary, forecastSalary, actualHours, forecastHours float64
+	var actualExtras, forecastExtras float64
 	var actualCount, forecastCount int
 
 	for _, shift := range shifts {
@@ -366,28 +379,77 @@ func (b *Bot) sendIncomeReport(chatID int64, start, end time.Time) {
 			log.Printf("пропущена смена #%d при расчёте отчёта: salary=%v hours=%v", shift.ID, salaryErr, hoursErr)
 			continue
 		}
+
+		// Получаем дополнительные работы для этой смены.
+		extras, err := b.extraRepo.GetExtras(
+			context.Background(),
+			chatID,
+			shift.ID,
+		)
+		if err != nil {
+			log.Printf("ошибка получения дополнительных работ смены #%d: %v", shift.ID, err)
+			b.api.Send(tgbotapi.NewMessage(
+				chatID,
+				"❌ Не удалось получить дополнительные работы для отчёта.",
+			))
+			return
+		}
+
+		// Рассчитываем дополнительные выплаты.
+		extraSalary, err := service.CalculateExtraSalary(shift, extras)
+		if err != nil {
+			log.Printf("ошибка расчёта дополнительных работ смены #%d: %v", shift.ID, err)
+			b.api.Send(tgbotapi.NewMessage(
+				chatID,
+				"❌ Не удалось рассчитать дополнительные работы.",
+			))
+			return
+		}
+
+		// Основная зарплата + дополнительные выплаты.
+		salary += extraSalary
+
 		if !shift.EndTime.After(now) {
 			actualSalary += salary
+			actualExtras += extraSalary
 			actualHours += hours
 			actualCount++
 		} else {
 			forecastSalary += salary
+			forecastExtras += extraSalary
 			forecastHours += hours
 			forecastCount++
 		}
+
 	}
 
 	text := fmt.Sprintf(
-		"💵 Доход за период\n📅 %s — %s\n\n"+
+		"💵 Доход за период\n"+
+			"📅 %s — %s\n\n"+
 			"✅ Заработано (завершённые смены): %.2f ₽\n"+
 			"   Смен: %d · Часов: %.2f\n\n"+
 			"🔮 Ожидается (незавершённые/плановые смены): %.2f ₽\n"+
 			"   Смен: %d · Часов: %.2f\n\n"+
 			"📊 Итого с учётом прогноза: %.2f ₽",
-		start.Format("02.01.2006"), end.Format("02.01.2006"),
-		actualSalary, actualCount, actualHours,
-		forecastSalary, forecastCount, forecastHours,
+		start.Format("02.01.2006"),
+		end.Format("02.01.2006"),
+		actualSalary,
+		actualCount,
+		actualHours,
+		forecastSalary,
+		forecastCount,
+		forecastHours,
 		actualSalary+forecastSalary,
+	)
+
+	text += fmt.Sprintf(
+		"\n\n📦 Дополнительные работы\n"+
+			"✅ За завершённые смены: %.2f ₽\n"+
+			"🔮 За плановые смены: %.2f ₽\n"+
+			"💰 Всего доплат: %.2f ₽",
+		actualExtras,
+		forecastExtras,
+		actualExtras+forecastExtras,
 	)
 
 	// Премию показываем только для полного календарного месяца.
@@ -588,7 +650,62 @@ func (b *Bot) buildMonthlyHistory(
 
 		salary, err := service.CalculateSalary(shift)
 		if err != nil {
+			log.Printf("ошибка расчёта зарплаты смены #%d: %v", shift.ID, err)
 			continue
+		}
+
+		// Получаем дополнительные работы смены.
+		extras, err := b.extraRepo.GetExtras(
+			context.Background(),
+			chatID,
+			shift.ID,
+		)
+		if err != nil {
+			return "", tgbotapi.InlineKeyboardMarkup{}, fmt.Errorf(
+				"ошибка получения доплат смены #%d: %w",
+				shift.ID,
+				err,
+			)
+		}
+
+		// Рассчитываем доплаты.
+		extraSalary, err := service.CalculateExtraSalary(shift, extras)
+		if err != nil {
+			return "", tgbotapi.InlineKeyboardMarkup{}, fmt.Errorf(
+				"ошибка расчёта доплат смены #%d: %w",
+				shift.ID,
+				err,
+			)
+		}
+
+		// Общая зарплата за смену.
+		salary += extraSalary
+
+		var extrasText strings.Builder
+
+		for _, extra := range extras {
+			switch extra {
+			case repository.ExtraUnloading:
+				fmt.Fprintf(
+					&extrasText,
+					"📦 Разгрузка: +%.2f ₽\n",
+					shift.HourlyRate*2,
+				)
+
+			case repository.ExtraTrash:
+				fmt.Fprintf(
+					&extrasText,
+					"🗑 Мусор: +%.2f ₽\n",
+					shift.HourlyRate*0.25,
+				)
+
+			case repository.ExtraDelivery:
+				fmt.Fprintf(
+					&extrasText,
+					"🚚 Доставка: +%.2f ₽\n",
+					hours/2*shift.HourlyRate,
+				)
+			}
 		}
 
 		count++
@@ -598,9 +715,10 @@ func (b *Bot) buildMonthlyHistory(
 		fmt.Fprintf(
 			&text,
 			"%d. 📅 %s\n"+
-				"🕐 %s — %s\n"+
+				"🕒 %s — %s\n"+
 				"☕ Перерыв: %d мин.\n"+
 				"⏱ %.2f ч.\n"+
+				"%s"+
 				"💰 %.2f ₽\n\n",
 			count,
 			shift.StartTime.Format("02.01.2006"),
@@ -608,6 +726,7 @@ func (b *Bot) buildMonthlyHistory(
 			shift.EndTime.Format("15:04"),
 			int(shift.Break.Minutes()),
 			hours,
+			extrasText.String(),
 			salary,
 		)
 	}
@@ -1059,6 +1178,129 @@ func (b *Bot) handleDeleteShift(message *tgbotapi.Message) {
 
 func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	data := callback.Data
+
+	if strings.HasPrefix(data, "extra_toggle:") {
+		if callback.Message == nil {
+			b.answerCallback(callback.ID, "Сообщение недоступно")
+			return
+		}
+
+		chatID := callback.Message.Chat.ID
+
+		activeID, exists := b.activeInlineMessages[chatID]
+		if !exists || activeID != callback.Message.MessageID {
+			b.answerCallback(callback.ID, "Меню устарело. Открой его заново.")
+			return
+		}
+
+		parts := strings.Split(data, ":")
+		if len(parts) != 3 {
+			b.answerCallback(callback.ID, "Некорректные данные")
+			return
+		}
+
+		shiftID, err := strconv.Atoi(parts[1])
+		if err != nil || shiftID <= 0 {
+			b.answerCallback(callback.ID, "Некорректный ID смены")
+			return
+		}
+
+		extraType := repository.ExtraType(parts[2])
+
+		switch extraType {
+		case repository.ExtraUnloading,
+			repository.ExtraTrash,
+			repository.ExtraDelivery:
+		default:
+			b.answerCallback(callback.ID, "Неизвестный тип работы")
+			return
+		}
+
+		// Проверяем, что смена принадлежит пользователю.
+		shift, err := b.shiftService.GetShiftByID(
+			context.Background(),
+			shiftID,
+			callback.From.ID,
+		)
+		if err != nil || shift == nil {
+			b.answerCallback(callback.ID, "Смена не найдена")
+			return
+		}
+
+		extras, err := b.extraRepo.GetExtras(
+			context.Background(),
+			callback.From.ID,
+			shiftID,
+		)
+		if err != nil {
+			log.Println("Ошибка получения доплат:", err)
+			b.answerCallback(callback.ID, "Ошибка базы данных")
+			return
+		}
+
+		alreadySelected := false
+		for _, extra := range extras {
+			if extra == extraType {
+				alreadySelected = true
+				break
+			}
+		}
+
+		if alreadySelected {
+			err = b.extraRepo.DeleteExtra(
+				context.Background(),
+				callback.From.ID,
+				shiftID,
+				extraType,
+			)
+		} else {
+			err = b.extraRepo.AddExtra(
+				context.Background(),
+				callback.From.ID,
+				shiftID,
+				extraType,
+			)
+		}
+
+		if err != nil {
+			log.Println("Ошибка изменения дополнительной работы:", err)
+			b.answerCallback(callback.ID, "Не удалось сохранить изменение")
+			return
+		}
+
+		b.answerCallback(callback.ID, "Сохранено")
+
+		// Обновляем галочки в том же сообщении.
+		b.handleExtraShift(callback, shiftID)
+		return
+	}
+
+	if strings.HasPrefix(data, "extra_shift:") {
+		if callback.Message == nil {
+			b.answerCallback(callback.ID, "Сообщение недоступно")
+			return
+		}
+
+		chatID := callback.Message.Chat.ID
+
+		activeID, exists := b.activeInlineMessages[chatID]
+		if !exists || activeID != callback.Message.MessageID {
+			b.answerCallback(callback.ID, "Меню устарело. Открой его заново.")
+			return
+		}
+
+		shiftID, err := strconv.Atoi(
+			strings.TrimPrefix(data, "extra_shift:"),
+		)
+		if err != nil || shiftID <= 0 {
+			b.answerCallback(callback.ID, "Некорректный ID смены")
+			return
+		}
+
+		b.answerCallback(callback.ID, "")
+		b.handleExtraShift(callback, shiftID)
+		return
+	}
 
 	if strings.HasPrefix(data, "history_prev:") ||
 		strings.HasPrefix(data, "history_next:") {
@@ -1901,4 +2143,181 @@ func (b *Bot) handleEditingRate(message *tgbotapi.Message) {
 	b.api.Send(msg)
 
 	delete(b.userStates, message.Chat.ID)
+}
+
+func (b *Bot) handleExtrasMenu(message *tgbotapi.Message) {
+	chatID := message.Chat.ID
+
+	shifts, err := b.shiftService.GetShifts(
+		context.Background(),
+		chatID,
+	)
+	if err != nil {
+		log.Println("Ошибка получения смен:", err)
+		b.api.Send(tgbotapi.NewMessage(
+			chatID,
+			"❌ Не удалось загрузить смены.",
+		))
+		return
+	}
+
+	if len(shifts) == 0 {
+		b.api.Send(tgbotapi.NewMessage(
+			chatID,
+			"📋 У тебя пока нет сохранённых смен.",
+		))
+		return
+	}
+
+	text := "📦 Дополнительные работы\n\nВыбери смену:"
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+
+	// Показываем не более 10 последних смен.
+	start := len(shifts) - 10
+	if start < 0 {
+		start = 0
+	}
+
+	for _, shift := range shifts[start:] {
+		label := fmt.Sprintf(
+			"📅 %s | %s–%s",
+			shift.StartTime.Format("02.01.2006"),
+			shift.StartTime.Format("15:04"),
+			shift.EndTime.Format("15:04"),
+		)
+
+		button := tgbotapi.NewInlineKeyboardButtonData(
+			label,
+			fmt.Sprintf("extra_shift:%d", shift.ID),
+		)
+
+		rows = append(
+			rows,
+			tgbotapi.NewInlineKeyboardRow(button),
+		)
+	}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
+
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = keyboard
+
+	sent, err := b.api.Send(msg)
+	if err != nil {
+		log.Println("Ошибка отправки списка смен:", err)
+		return
+	}
+
+	b.activeInlineMessages[chatID] = sent.MessageID
+}
+
+func (b *Bot) handleExtraShift(
+	callback *tgbotapi.CallbackQuery,
+	shiftID int,
+) {
+	if callback.Message == nil {
+		b.answerCallback(callback.ID, "Сообщение недоступно")
+		return
+	}
+
+	chatID := callback.Message.Chat.ID
+
+	// Проверяем, что смена принадлежит пользователю.
+	shift, err := b.shiftService.GetShiftByID(
+		context.Background(),
+		shiftID,
+		callback.From.ID,
+	)
+	if err != nil || shift == nil {
+		b.answerCallback(callback.ID, "Смена не найдена")
+		return
+	}
+
+	extras, err := b.extraRepo.GetExtras(
+		context.Background(),
+		callback.From.ID,
+		shiftID,
+	)
+	if err != nil {
+		log.Println("Ошибка получения дополнительных работ:", err)
+		b.answerCallback(callback.ID, "Ошибка загрузки")
+		return
+	}
+
+	baseSalary, err := service.CalculateSalary(*shift)
+	if err != nil {
+		log.Println("Ошибка расчёта зарплаты:", err)
+		b.answerCallback(callback.ID, "Ошибка расчёта зарплаты")
+		return
+	}
+
+	extraSalary, err := service.CalculateExtraSalary(*shift, extras)
+	if err != nil {
+		log.Println("Ошибка расчёта доплат:", err)
+		b.answerCallback(callback.ID, "Ошибка расчёта доплат")
+		return
+	}
+
+	totalSalary := baseSalary + extraSalary
+
+	selected := make(map[repository.ExtraType]bool)
+	for _, extra := range extras {
+		selected[extra] = true
+	}
+
+	mark := func(extra repository.ExtraType) string {
+		if selected[extra] {
+			return "✅ "
+		}
+		return "⬜ "
+	}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(
+				mark(repository.ExtraUnloading)+"📦 Разгрузка",
+				fmt.Sprintf("extra_toggle:%d:unloading", shiftID),
+			),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(
+				mark(repository.ExtraTrash)+"🗑 Мусор",
+				fmt.Sprintf("extra_toggle:%d:trash", shiftID),
+			),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(
+				mark(repository.ExtraDelivery)+"🚚 Доставка",
+				fmt.Sprintf("extra_toggle:%d:delivery", shiftID),
+			),
+		),
+	)
+
+	text := fmt.Sprintf(
+		"📦 Дополнительные работы\n\n"+
+			"📅 Смена: %s\n"+
+			"⏰ %s–%s\n\n"+
+			"💰 Основная зарплата: %.2f ₽\n"+
+			"📦 Доплаты: %.2f ₽\n"+
+			"💵 Итого за смену: %.2f ₽\n\n"+
+			"Нажми на работу, чтобы добавить или убрать её:",
+		shift.StartTime.Format("02.01.2006"),
+		shift.StartTime.Format("15:04"),
+		shift.EndTime.Format("15:04"),
+		baseSalary,
+		extraSalary,
+		totalSalary,
+	)
+
+	edit := tgbotapi.NewEditMessageText(
+		chatID,
+		callback.Message.MessageID,
+		text,
+	)
+	edit.ReplyMarkup = &keyboard
+
+	if _, err := b.api.Send(edit); err != nil {
+		log.Println("Ошибка открытия дополнительных работ:", err)
+	}
 }
