@@ -3,8 +3,9 @@ package repository
 import (
 	"context"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"tg_bot/model"
 )
@@ -198,6 +199,9 @@ func (r *ShiftRepository) GetShiftByID(
 		return nil, err
 	}
 
+	shift.StartTime = localTime(shift.StartTime)
+	shift.EndTime = localTime(shift.EndTime)
+
 	shift.Break = time.Duration(breakMinutes) * time.Minute
 
 	return &shift, nil
@@ -208,9 +212,6 @@ func localTime(t time.Time) time.Time {
 	if err != nil {
 		return t
 	}
-	return time.Date(
-		t.Year(), t.Month(), t.Day(),
-		t.Hour(), t.Minute(), t.Second(), t.Nanosecond(),
-		loc,
-	)
+
+	return t.In(loc)
 }

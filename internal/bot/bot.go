@@ -290,22 +290,44 @@ func (b *Bot) handleIncomeMenu(message *tgbotapi.Message) {
 }
 
 func (b *Bot) handleCurrentMonthIncome(message *tgbotapi.Message) {
-	now := time.Now().In(time.Local)
-	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		log.Printf("ошибка загрузки часового пояса: %v", err)
+		return
+	}
+
+	now := time.Now().In(loc)
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
 	end := start.AddDate(0, 1, 0).Add(-time.Nanosecond)
+
 	b.sendIncomeReport(message.Chat.ID, start, end)
 }
 
 func (b *Bot) handlePreviousMonthIncome(message *tgbotapi.Message) {
-	now := time.Now().In(time.Local)
-	thisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		log.Printf("ошибка загрузки часового пояса: %v", err)
+		return
+	}
+
+	now := time.Now().In(loc)
+	thisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
 	start := thisMonth.AddDate(0, -1, 0)
 	end := thisMonth.Add(-time.Nanosecond)
+
 	b.sendIncomeReport(message.Chat.ID, start, end)
 }
-
 func (b *Bot) handleIncomeStartDate(message *tgbotapi.Message) {
-	date, err := time.ParseInLocation("02.01.2006", strings.TrimSpace(message.Text), time.Local)
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		log.Printf("ошибка загрузки часового пояса: %v", err)
+		return
+	}
+	date, err := time.ParseInLocation(
+		"02.01.2006",
+		strings.TrimSpace(message.Text),
+		loc,
+	)
 	if err != nil {
 		b.api.Send(tgbotapi.NewMessage(message.Chat.ID, "❌ Не понял дату. Введи её в формате ДД.ММ.ГГГГ, например 01.10.2026."))
 		return
@@ -321,13 +343,26 @@ func (b *Bot) handleIncomeStartDate(message *tgbotapi.Message) {
 	if state == nil {
 		return
 	}
-	state.ReportStart = time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.Local)
+	state.ReportStart = time.Date(
+		date.Year(), date.Month(), date.Day(),
+		0, 0, 0, 0,
+		loc,
+	)
 	state.Step = "waiting_income_end"
 	b.api.Send(tgbotapi.NewMessage(message.Chat.ID, "Теперь введи конечную дату периода в формате ДД.ММ.ГГГГ. Например: 31.10.2026"))
 }
 
 func (b *Bot) handleIncomeEndDate(message *tgbotapi.Message) {
-	date, err := time.ParseInLocation("02.01.2006", strings.TrimSpace(message.Text), time.Local)
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		log.Printf("ошибка загрузки часового пояса: %v", err)
+		return
+	}
+	date, err := time.ParseInLocation(
+		"02.01.2006",
+		strings.TrimSpace(message.Text),
+		loc,
+	)
 	if err != nil {
 		b.api.Send(tgbotapi.NewMessage(message.Chat.ID, "❌ Не понял дату. Введи её в формате ДД.ММ.ГГГГ, например 31.10.2026."))
 		return
@@ -343,7 +378,11 @@ func (b *Bot) handleIncomeEndDate(message *tgbotapi.Message) {
 	if state == nil {
 		return
 	}
-	end := time.Date(date.Year(), date.Month(), date.Day(), 23, 59, 59, int(time.Second-time.Nanosecond), time.Local)
+	end := time.Date(
+		date.Year(), date.Month(), date.Day(),
+		23, 59, 59, int(time.Second-time.Nanosecond),
+		loc,
+	)
 	start := state.ReportStart
 	if end.Before(start) {
 		b.api.Send(tgbotapi.NewMessage(message.Chat.ID, "❌ Конечная дата раньше начальной. Введи конечную дату ещё раз."))
@@ -555,7 +594,17 @@ func (b *Bot) handleAddShift(message *tgbotapi.Message) {
 
 // handleShiftDate сохраняет дату смены и переходит к вводу времени начала.
 func (b *Bot) handleShiftDate(message *tgbotapi.Message) {
-	shiftDate, err := time.ParseInLocation("02.01.2006", strings.TrimSpace(message.Text), time.Local)
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		log.Printf("ошибка загрузки часового пояса: %v", err)
+		return
+	}
+
+	shiftDate, err := time.ParseInLocation(
+		"02.01.2006",
+		strings.TrimSpace(message.Text),
+		loc,
+	)
 	if err != nil {
 		msg := tgbotapi.NewMessage(
 			message.Chat.ID,
@@ -603,7 +652,13 @@ func (b *Bot) handleShiftDate(message *tgbotapi.Message) {
 }
 
 func (b *Bot) handleHistory(message *tgbotapi.Message) {
-	b.sendMonthlyHistory(message.Chat.ID, time.Now())
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		log.Printf("ошибка загрузки часового пояса: %v", err)
+		return
+	}
+
+	b.sendMonthlyHistory(message.Chat.ID, time.Now().In(loc))
 }
 
 func (b *Bot) buildMonthlyHistory(
@@ -911,7 +966,7 @@ func (b *Bot) handleStartTime(message *tgbotapi.Message) {
 		startTime.Minute(),
 		0,
 		0,
-		time.Local,
+		state.StartTime.Location(),
 	)
 
 	state.StartTime = startTime
@@ -1324,7 +1379,13 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 			return
 		}
 
-		month, err := time.Parse("2006-01", parts[1])
+		loc, err := time.LoadLocation("Asia/Yekaterinburg")
+		if err != nil {
+			log.Printf("ошибка загрузки часового пояса: %v", err)
+			return
+		}
+
+		month, err := time.ParseInLocation("2006-01", parts[1], loc)
 		if err != nil {
 			b.answerCallback(callback.ID, "Некорректная дата")
 			return
