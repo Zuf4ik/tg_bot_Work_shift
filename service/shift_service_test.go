@@ -63,14 +63,12 @@ func TestCalculateSalaryMixedShift(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 20:00–22:00:
-	// 2 × 250 = 500
+	// 20:00–22:00: 2 × 250 = 500
+	// 22:00–00:00: 2 × 250 × 1.2 = 600
+	// 00:00–02:00: 2 × 250 × 1.3 = 650
 	//
-	// 22:00–02:00:
-	// 4 × 250 × 1.3 = 1300
-	//
-	// Итого: 1800
-	expected := 1800.0
+	// Итого: 1750
+	expected := 1750.0
 
 	if math.Abs(salary-expected) > 0.001 {
 		t.Errorf("ожидалось %.2f, получено %.2f", expected, salary)
@@ -191,8 +189,10 @@ func TestCalculateSalaryNightBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 21:00–22:00: 250 ₽; 22:00–23:00: 250 × 1.3 = 325 ₽.
-	expected := 575.0
+	// 21:00–22:00: 250 ₽
+	// 22:00–23:00: 250 × 1.2 = 300 ₽
+	// Итого: 550 ₽
+	expected := 550.0
 	if math.Abs(salary-expected) > 0.001 {
 		t.Errorf("ожидалось %.2f, получено %.2f", expected, salary)
 	}
@@ -263,5 +263,37 @@ func TestCalculateSalaryRateAtLimit(t *testing.T) {
 
 	if _, err := CalculateSalary(shift); err != nil {
 		t.Fatalf("ставка 10000 должна допускаться, получена ошибка: %v", err)
+	}
+}
+
+func TestCalculateSalaryFullNight(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	shift := model.Shift{
+		StartTime:  time.Date(2026, 11, 10, 22, 0, 0, 0, loc),
+		EndTime:    time.Date(2026, 11, 11, 7, 0, 0, 0, loc),
+		Break:      0,
+		HourlyRate: 250,
+	}
+
+	salary, err := CalculateSalary(shift)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 22:00–00:00: 2 × 250 × 1.2 = 600
+	// 00:00–07:00: 7 × 250 × 1.3 = 2275
+	// Итого: 2875 ₽
+	expected := 2875.0
+
+	if math.Abs(salary-expected) > 0.001 {
+		t.Errorf(
+			"ожидалось %.2f, получено %.2f",
+			expected,
+			salary,
+		)
 	}
 }

@@ -1,10 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
-
-	"encoding/json"
+	"os"
 	"strconv"
 	"tg_bot/config"
 	"tg_bot/internal/database"
@@ -35,6 +35,12 @@ func main() {
 
 	log.Println("Database connected!")
 
+	apiKey := os.Getenv("API_KEY")
+
+	if apiKey == "" {
+		log.Fatal("API_KEY не задан")
+	}
+
 	shiftRepo := repository.NewShiftRepository(db)
 	shiftService := service.NewShiftService(shiftRepo)
 
@@ -44,35 +50,45 @@ func main() {
 
 	http.Handle(
 		"/api/shifts",
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.Method {
-			case http.MethodGet:
-				getShiftsHandler(shiftService)(w, r)
-			case http.MethodPost:
-				createShiftHandler(shiftService)(w, r)
-			default:
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			}
-		}),
+		apiKeyAuth(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					getShiftsHandler(shiftService)(w, r)
+
+				case http.MethodPost:
+					createShiftHandler(shiftService)(w, r)
+
+				default:
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
+			}),
+			apiKey,
+		),
 	)
 
 	http.Handle(
 		"/api/shifts/{id}",
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.Method {
-			case http.MethodGet:
-				getShiftByIDHandler(shiftService)(w, r)
-			case http.MethodPut:
-				updateShiftHandler(shiftService)(w, r)
-			default:
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			}
-		}),
+		apiKeyAuth(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					getShiftByIDHandler(shiftService)(w, r)
+
+				case http.MethodPut:
+					updateShiftHandler(shiftService)(w, r)
+
+				default:
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
+			}),
+			apiKey,
+		),
 	)
 
-	log.Println("API запущен на :8080")
+	log.Println("API запущен на 127.0.0.1:8080")
 
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe("127.0.0.1:8080", nil); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -182,13 +198,13 @@ func updateShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 			return
 		}
 
-		startTime, err := time.Parse("2006-01-02T15:04:05", req.StartTime)
+		startTime, err := parseShiftTime(req.StartTime)
 		if err != nil {
 			http.Error(w, "invalid start_time", http.StatusBadRequest)
 			return
 		}
 
-		endTime, err := time.Parse("2006-01-02T15:04:05", req.EndTime)
+		endTime, err := parseShiftTime(req.EndTime)
 		if err != nil {
 			http.Error(w, "invalid end_time", http.StatusBadRequest)
 			return
@@ -228,6 +244,19 @@ func updateShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 	}
 }
 
+func parseShiftTime(value string) (time.Time, error) {
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return time.ParseInLocation(
+		"2006-01-02T15:04:05",
+		value,
+		loc,
+	)
+}
+
 func createShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createShiftRequest
@@ -239,13 +268,15 @@ func createShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 			return
 		}
 
-		startTime, err := time.Parse("2006-01-02T15:04:05", req.StartTime)
+		startTime, err := parseShiftTime(req.StartTime)
+
 		if err != nil {
 			http.Error(w, "invalid start_time", http.StatusBadRequest)
 			return
 		}
 
-		endTime, err := time.Parse("2006-01-02T15:04:05", req.EndTime)
+		endTime, err := parseShiftTime(req.EndTime)
+
 		if err != nil {
 			http.Error(w, "invalid end_time", http.StatusBadRequest)
 			return

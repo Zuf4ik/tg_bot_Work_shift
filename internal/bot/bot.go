@@ -157,6 +157,12 @@ func (b *Bot) Start() {
 			continue
 		}
 
+		if update.Message.Text == "🗓 Календарь смен" {
+			b.resetUserFlow(update.Message.Chat.ID)
+			b.handleShiftCalendar(update.Message)
+			continue
+		}
+
 		if update.Message.Text == "💰 Указать ставку" {
 			b.resetUserFlow(update.Message.Chat.ID)
 			b.handleSetRate(update.Message)
@@ -254,6 +260,7 @@ func mainKeyboard() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton("💵 Доход за период"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("🗓 Календарь смен"),
 			tgbotapi.NewKeyboardButton("📦 Дополнительные работы"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
@@ -632,13 +639,8 @@ func (b *Bot) handleShiftDate(message *tgbotapi.Message) {
 		return
 	}
 
-	state.StartTime = time.Date(
-		shiftDate.Year(),
-		shiftDate.Month(),
-		shiftDate.Day(),
-		0, 0, 0, 0,
-		time.Local,
-	)
+	state.StartTime = startOfShiftDay(shiftDate)
+
 	state.Step = "waiting_start_time"
 
 	msg := tgbotapi.NewMessage(
@@ -649,6 +651,16 @@ func (b *Bot) handleShiftDate(message *tgbotapi.Message) {
 	if _, sendErr := b.api.Send(msg); sendErr != nil {
 		log.Println("ошибка отправки сообщения:", sendErr)
 	}
+}
+
+func startOfShiftDay(date time.Time) time.Time {
+	return time.Date(
+		date.Year(),
+		date.Month(),
+		date.Day(),
+		0, 0, 0, 0,
+		date.Location(),
+	)
 }
 
 func (b *Bot) handleHistory(message *tgbotapi.Message) {
@@ -1233,6 +1245,11 @@ func (b *Bot) handleDeleteShift(message *tgbotapi.Message) {
 
 func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	data := callback.Data
+
+	if strings.HasPrefix(data, "calendar:") {
+		b.handleShiftCalendarCallback(callback)
+		return
+	}
 
 	if strings.HasPrefix(data, "extra_toggle:") {
 		if callback.Message == nil {
@@ -2381,4 +2398,40 @@ func (b *Bot) handleExtraShift(
 	if _, err := b.api.Send(edit); err != nil {
 		log.Println("Ошибка открытия дополнительных работ:", err)
 	}
+}
+
+func (b *Bot) handleShiftCalendar(message *tgbotapi.Message) {
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		log.Println("ошибка загрузки часового пояса:", err)
+		return
+	}
+
+	month := time.Now().In(loc)
+
+	msg := tgbotapi.NewMessage(
+		message.Chat.ID,
+		"🗓 Календарь смен — "+month.Format("01.2006")+
+			"\n\nВыбери нужную дату:",
+	)
+
+	busyDays, err := b.getCalendarBusyDays(message.Chat.ID, month)
+	if err != nil {
+		log.Println("ошибка получения смен для календаря:", err)
+		b.api.Send(tgbotapi.NewMessage(
+			message.Chat.ID,
+			"❌ Не удалось загрузить смены.",
+		))
+		return
+	}
+
+	msg.ReplyMarkup = buildShiftCalendar(month, busyDays)
+
+	sent, err := b.api.Send(msg)
+	if err != nil {
+		log.Println("ошибка отправки календаря:", err)
+		return
+	}
+
+	b.activeInlineMessages[message.Chat.ID] = sent.MessageID
 }
