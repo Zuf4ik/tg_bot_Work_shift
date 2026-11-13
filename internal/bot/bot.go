@@ -2409,21 +2409,44 @@ func (b *Bot) handleShiftCalendar(message *tgbotapi.Message) {
 
 	month := time.Now().In(loc)
 
-	msg := tgbotapi.NewMessage(
-		message.Chat.ID,
-		"🗓 Календарь смен — "+month.Format("01.2006")+
-			"\n\nВыбери нужную дату:",
-	)
+	ctx := context.Background()
 
-	busyDays, err := b.getCalendarBusyDays(message.Chat.ID, month)
+	// Получаем все смены пользователя один раз.
+	shifts, err := b.shiftService.GetShifts(
+		ctx,
+		message.Chat.ID,
+	)
 	if err != nil {
-		log.Println("ошибка получения смен для календаря:", err)
+		log.Println("ошибка загрузки смен:", err)
 		b.api.Send(tgbotapi.NewMessage(
 			message.Chat.ID,
 			"❌ Не удалось загрузить смены.",
 		))
 		return
 	}
+
+	// Рассчитываем статистику из полученных смен.
+	hours, salary, err := b.getCalendarMonthTotalsFromShifts(
+		ctx,
+		message.Chat.ID,
+		month,
+		shifts,
+	)
+	if err != nil {
+		log.Println("ошибка расчёта статистики:", err)
+		b.api.Send(tgbotapi.NewMessage(
+			message.Chat.ID,
+			"❌ Не удалось рассчитать статистику месяца.",
+		))
+		return
+	}
+
+	msg := tgbotapi.NewMessage(
+		message.Chat.ID,
+		calendarMonthSummary(month, hours, salary),
+	)
+
+	busyDays := calendarBusyDaysFromShifts(shifts, month)
 
 	msg.ReplyMarkup = buildShiftCalendar(month, busyDays)
 

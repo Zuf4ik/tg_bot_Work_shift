@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
-
+	"tg_bot/internal/repository"
+	"tg_bot/model"
 	"tg_bot/service"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -245,7 +246,7 @@ func (b *Bot) handleShiftCalendarCallback(callback *tgbotapi.CallbackQuery) {
 		msg := tgbotapi.NewMessage(
 			chatID,
 			"➕ Добавление смены\n\n"+
-				"📅 Дата: "+date.Format("12.11.2026")+
+				"📅 Дата: "+date.Format("02.01.2006")+
 				"\n\nВведи время начала смены в формате ЧЧ:ММ.",
 		)
 
@@ -283,20 +284,39 @@ func (b *Bot) handleShiftCalendarCallback(callback *tgbotapi.CallbackQuery) {
 		return
 	}
 
-	busyDays, err := b.getCalendarBusyDays(chatID, month)
+	ctx := context.Background()
+
+	// Получаем смены пользователя один раз.
+	shifts, err := b.shiftService.GetShifts(ctx, chatID)
 	if err != nil {
-		log.Println("ошибка получения смен для календаря:", err)
-		b.answerCallback(callback.ID, "❌ Не удалось загрузить смены")
+		log.Println("ошибка загрузки смен:", err)
+		b.answerCallback(callback.ID, "Не удалось загрузить смены")
 		return
 	}
 
+	// Рассчитываем часы и зарплату за выбранный месяц.
+	hours, salary, err := b.getCalendarMonthTotalsFromShifts(
+		ctx,
+		chatID,
+		month,
+		shifts,
+	)
+	if err != nil {
+		log.Println("ошибка расчёта статистики:", err)
+		b.answerCallback(callback.ID, "Ошибка расчёта статистики")
+		return
+	}
+
+	// Определяем дни, в которые есть смены.
+	busyDays := calendarBusyDaysFromShifts(shifts, month)
+
+	// Создаём календарь с отметками рабочих дней.
 	keyboard := buildShiftCalendar(month, busyDays)
 
 	edit := tgbotapi.NewEditMessageText(
 		chatID,
 		messageID,
-		"🗓 Календарь смен — "+month.Format("01.2006")+
-			"\n\nВыбери нужную дату:",
+		calendarMonthSummary(month, hours, salary),
 	)
 
 	edit.ReplyMarkup = &keyboard
@@ -307,30 +327,6 @@ func (b *Bot) handleShiftCalendarCallback(callback *tgbotapi.CallbackQuery) {
 	}
 
 	b.answerCallback(callback.ID, "")
-}
-
-func (b *Bot) getCalendarBusyDays(
-	chatID int64,
-	month time.Time,
-) (map[int]bool, error) {
-
-	shifts, err := b.shiftService.GetShifts(
-		context.Background(),
-		chatID,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	busyDays := make(map[int]bool)
-
-	for _, shift := range shifts {
-		if shiftInMonth(shift.StartTime, month) {
-			busyDays[shift.StartTime.Day()] = true
-		}
-	}
-
-	return busyDays, nil
 }
 
 func (b *Bot) buildCalendarDayText(
@@ -353,6 +349,7 @@ func (b *Bot) buildCalendarDayText(
 	)
 
 	count := 0
+	now := time.Now()
 
 	for _, shift := range shifts {
 		start := shift.StartTime.In(date.Location())
@@ -396,18 +393,24 @@ func (b *Bot) buildCalendarDayText(
 
 		count++
 
+		incomeLabel := "💰 Заработано"
+
+		if shift.EndTime.After(now) {
+			incomeLabel = "📈 Ожидаемый доход"
+		}
+
 		fmt.Fprintf(
 			&text,
-			"💼 Смена №%d\n"+
+			"💼 Смена\n"+
 				"🕒 %s — %s\n"+
 				"☕ Перерыв: %.0f мин.\n"+
-				"⏱ Отработано: %.2f ч.\n"+
-				"💰 Заработано: %.2f ₽\n\n",
-			count,
+				"⏱ Продолжительность: %.2f ч.\n"+
+				"%s: %.2f ₽\n\n",
 			start.Format("02.01 15:04"),
 			end.Format("02.01 15:04"),
 			shift.Break.Minutes(),
 			hours,
+			incomeLabel,
 			salary+extraSalary,
 		)
 	}
@@ -417,4 +420,138 @@ func (b *Bot) buildCalendarDayText(
 	}
 
 	return text.String(), nil
+}
+
+func (b *Bot) getCalendarMonthTotalsFromShifts(
+	ctx context.Context,
+	telegramID int64,
+	month time.Time,
+	shifts []model.Shift,
+) (float64, float64, error) {
+	return sumCalendarMonthTotals(
+		shifts,
+		month,
+		time.Now(),
+		func(shiftID int) ([]repository.ExtraType, error) {
+			return b.extraRepo.GetExtras(
+				ctx,
+				telegramID,
+				shiftID,
+			)
+		},
+	)
+}
+
+func calendarMonthSummary(
+	month time.Time,
+	hours float64,
+	salary float64,
+) string {
+	return fmt.Sprintf(
+		"🗓 Календарь смен — %s\n\n"+
+			"⏱ Отработано: %.2f ч.\n"+
+			"💰 Заработано: %.2f ₽\n\n"+
+			"Выбери нужную дату:",
+		month.Format("01.2006"),
+		hours,
+		salary,
+	)
+}
+
+func shouldCountCalendarShift(
+	shift model.Shift,
+	month time.Time,
+	now time.Time,
+) bool {
+	// Смена должна начинаться в выбранном месяце.
+	if !shiftInMonth(
+		shift.StartTime.In(month.Location()),
+		month,
+	) {
+		return false
+	}
+
+	// Незавершённые и будущие смены не учитываем.
+	if shift.EndTime.After(now) {
+		return false
+	}
+
+	return true
+}
+
+func calculateCalendarShiftTotals(
+	shift model.Shift,
+	extras []repository.ExtraType,
+) (float64, float64, error) {
+
+	hours, err := service.CalculateHours(shift)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	salary, err := service.CalculateSalary(shift)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	extraSalary, err := service.CalculateExtraSalary(
+		shift,
+		extras,
+	)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return hours, salary + extraSalary, nil
+}
+
+func calendarBusyDaysFromShifts(
+	shifts []model.Shift,
+	month time.Time,
+) map[int]bool {
+	busyDays := make(map[int]bool)
+
+	for _, shift := range shifts {
+		start := shift.StartTime.In(month.Location())
+
+		if shiftInMonth(start, month) {
+			busyDays[start.Day()] = true
+		}
+	}
+
+	return busyDays
+}
+
+func sumCalendarMonthTotals(
+	shifts []model.Shift,
+	month time.Time,
+	now time.Time,
+	getExtras func(int) ([]repository.ExtraType, error),
+) (float64, float64, error) {
+	var totalHours float64
+	var totalSalary float64
+
+	for _, shift := range shifts {
+		if !shouldCountCalendarShift(shift, month, now) {
+			continue
+		}
+
+		extras, err := getExtras(shift.ID)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		hours, salary, err := calculateCalendarShiftTotals(
+			shift,
+			extras,
+		)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		totalHours += hours
+		totalSalary += salary
+	}
+
+	return totalHours, totalSalary, nil
 }
