@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"tg_bot/config"
@@ -23,25 +24,42 @@ func main() {
 		log.Fatal("ошибка загрузки .env:", err)
 	}
 
-	proxyURL, err := url.Parse("socks5://127.0.0.1:10808")
-	if err != nil {
-		log.Fatal("ошибка адреса прокси:", err)
-	}
+	var client *http.Client
 
-	dialer, err := proxy.FromURL(proxyURL, &net.Dialer{
-		Timeout: 10 * time.Second,
-	})
-	if err != nil {
-		log.Fatal("ошибка настройки прокси:", err)
-	}
+	if os.Getenv("USE_PROXY") == "true" {
+		proxyAddress := os.Getenv("SOCKS5_PROXY")
+		if proxyAddress == "" {
+			log.Fatal("SOCKS5_PROXY не указан в .env")
+		}
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialer.Dial(network, addr)
+		proxyURL, err := url.Parse(proxyAddress)
+		if err != nil {
+			log.Fatal("ошибка адреса прокси:", err)
+		}
+
+		dialer, err := proxy.FromURL(proxyURL, &net.Dialer{
+			Timeout: 10 * time.Second,
+		})
+		if err != nil {
+			log.Fatal("ошибка настройки прокси:", err)
+		}
+
+		client = &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					return dialer.Dial(network, addr)
+				},
 			},
-		},
-		Timeout: 60 * time.Second,
+			Timeout: 60 * time.Second,
+		}
+
+		log.Println("Telegram: подключение через SOCKS5")
+	} else {
+		client = &http.Client{
+			Timeout: 60 * time.Second,
+		}
+
+		log.Println("Telegram: прямое подключение")
 	}
 
 	api, err := tgbotapi.NewBotAPIWithClient(

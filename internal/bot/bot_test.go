@@ -43,3 +43,32 @@ func TestStartOfShiftDayTimezone(t *testing.T) {
 		)
 	}
 }
+
+func TestIsActiveInlineMessage(t *testing.T) {
+	b := &Bot{
+		activeInlineMessages: map[int64]int{
+			123: 456,
+		},
+	}
+
+	tests := []struct {
+		name      string
+		chatID    int64
+		messageID int
+		want      bool
+	}{
+		{"Активное сообщение", 123, 456, true},
+		{"Устаревшее сообщение", 123, 999, false},
+		{"Неизвестный чат", 999, 456, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := b.isActiveInlineMessage(tt.chatID, tt.messageID)
+
+			if got != tt.want {
+				t.Errorf("ожидалось %v, получено %v", tt.want, got)
+			}
+		})
+	}
+}

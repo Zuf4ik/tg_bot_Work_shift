@@ -74,6 +74,15 @@ func (b *Bot) clearActiveInlineKeyboard(chatID int64) {
 	delete(b.activeInlineMessages, chatID)
 }
 
+func (b *Bot) isActiveInlineMessage(
+	chatID int64,
+	messageID int,
+) bool {
+	activeID, exists := b.activeInlineMessages[chatID]
+
+	return exists && activeID == messageID
+}
+
 // Завершает текущий сценарий перед переходом в меню.
 func (b *Bot) resetUserFlow(chatID int64) {
 	b.clearActiveInlineKeyboard(chatID)
@@ -1164,9 +1173,32 @@ func (b *Bot) handleBreakTime(message *tgbotapi.Message) {
 		),
 	)
 
-	if _, err := b.api.Send(msg); err != nil {
-		log.Println("ошибка отправки сообщения:", err)
+	// Кнопка возврата к дню добавленной смены.
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		log.Println("ошибка загрузки часового пояса:", err)
+		return
 	}
+
+	shiftDate := shift.StartTime.In(loc)
+
+	backButton := tgbotapi.NewInlineKeyboardButtonData(
+		"🗓 Вернуться к календарю",
+		"calendar:day:"+shiftDate.Format("2006-01-02"),
+	)
+
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(backButton),
+	)
+
+	sent, err := b.api.Send(msg)
+	if err != nil {
+		log.Println("ошибка отправки сообщения:", err)
+		return
+	}
+
+	// Регистрируем сообщение с кнопкой как активное.
+	b.activeInlineMessages[message.Chat.ID] = sent.MessageID
 
 	delete(b.userStates, message.Chat.ID)
 }
@@ -1436,14 +1468,9 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	}
 
 	chatID := callback.Message.Chat.ID
-	activeMessageID, exists := b.activeInlineMessages[chatID]
 
-	if !exists || activeMessageID != callback.Message.MessageID {
-		answer := tgbotapi.NewCallback(
-			callback.ID,
-			"Действие устарело. Открой меню заново.",
-		)
-		b.api.Request(answer)
+	if !b.isActiveInlineMessage(chatID, callback.Message.MessageID) {
+		b.answerCallback(callback.ID, "Действие устарело. Открой меню заново.")
 		return
 	}
 
@@ -1454,6 +1481,23 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		if err != nil || shiftID <= 0 {
 			log.Printf("некорректный ID смены в callback %q", data)
 			b.answerCallback(callback.ID, "❌ Некорректный номер смены.")
+			return
+		}
+
+		if callback.Message == nil ||
+			callback.From.ID != callback.Message.Chat.ID {
+			b.answerCallback(callback.ID, "Нет доступа")
+			return
+		}
+
+		shift, err := b.shiftService.GetShiftByID(
+			context.Background(),
+			shiftID,
+			callback.From.ID,
+		)
+
+		if err != nil || shift == nil {
+			b.answerCallback(callback.ID, "Смена не найдена")
 			return
 		}
 
@@ -1478,8 +1522,8 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 			),
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
-					"↩ Отмена",
-					"cancel_edit",
+					"◀️ Назад к смене",
+					fmt.Sprintf("calendar:shift:%d", shiftID),
 				),
 			),
 		)
@@ -1495,7 +1539,13 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 
 		edit.ReplyMarkup = &keyboard
 
-		b.api.Send(edit)
+		if _, err := b.api.Send(edit); err != nil {
+			log.Println("ошибка открытия меню редактирования смены:", err)
+			return
+		}
+
+		b.activeInlineMessages[callback.Message.Chat.ID] =
+			callback.Message.MessageID
 
 		answer := tgbotapi.NewCallback(
 			callback.ID,
@@ -1514,6 +1564,23 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		if err != nil || shiftID <= 0 {
 			log.Printf("некорректный ID смены в callback %q", data)
 			b.answerCallback(callback.ID, "❌ Некорректный номер смены.")
+			return
+		}
+
+		if callback.Message == nil ||
+			callback.From.ID != callback.Message.Chat.ID {
+			b.answerCallback(callback.ID, "Нет доступа")
+			return
+		}
+
+		shift, err := b.shiftService.GetShiftByID(
+			context.Background(),
+			shiftID,
+			callback.From.ID,
+		)
+
+		if err != nil || shift == nil {
+			b.answerCallback(callback.ID, "Смена не найдена")
 			return
 		}
 
@@ -1631,6 +1698,23 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 			return
 		}
 
+		if callback.Message == nil ||
+			callback.From.ID != callback.Message.Chat.ID {
+			b.answerCallback(callback.ID, "Нет доступа")
+			return
+		}
+
+		shift, err := b.shiftService.GetShiftByID(
+			context.Background(),
+			shiftID,
+			callback.From.ID,
+		)
+
+		if err != nil || shift == nil {
+			b.answerCallback(callback.ID, "Смена не найдена")
+			return
+		}
+
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
@@ -1638,8 +1722,8 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 					fmt.Sprintf("delete_shift:%d", shiftID),
 				),
 				tgbotapi.NewInlineKeyboardButtonData(
-					"↩ Отмена",
-					"cancel_delete",
+					"◀️ Назад к смене",
+					fmt.Sprintf("calendar:shift:%d", shiftID),
 				),
 			),
 		)
@@ -1676,10 +1760,31 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 			return
 		}
 
+		if callback.Message == nil ||
+			callback.From.ID != callback.Message.Chat.ID {
+			b.answerCallback(callback.ID, "Нет доступа")
+			return
+		}
+
+		shift, err := b.shiftService.GetShiftByID(
+			context.Background(),
+			shiftID,
+			callback.From.ID,
+		)
+
+		if err != nil || shift == nil {
+			b.answerCallback(callback.ID, "Смена не найдена")
+			return
+		}
+
+		month := shift.StartTime.In(
+			time.FixedZone("Уфа", 5*60*60),
+		).Format("2006-01")
+
 		err = b.shiftService.DeleteShift(
 			context.Background(),
 			shiftID,
-			callback.Message.Chat.ID,
+			callback.From.ID,
 		)
 
 		if err != nil {
@@ -1705,7 +1810,26 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 			),
 		)
 
-		b.api.Send(edit)
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(
+					"🗓 Вернуться к календарю",
+					"calendar:month:"+month,
+				),
+			),
+		)
+
+		edit.ReplyMarkup = &keyboard
+
+		if _, err := b.api.Send(edit); err != nil {
+			log.Println("ошибка обновления сообщения после удаления:", err)
+			b.answerCallback(callback.ID, "Смена удалена, но не удалось обновить сообщение")
+			return
+		}
+
+		// Регистрируем сообщение с кнопкой возврата как активное.
+		b.activeInlineMessages[callback.Message.Chat.ID] =
+			callback.Message.MessageID
 
 		answer := tgbotapi.NewCallback(
 			callback.ID,
@@ -1811,6 +1935,31 @@ func (b *Bot) handleEditShift(message *tgbotapi.Message) {
 	b.activeInlineMessages[message.Chat.ID] = sentMessage.MessageID
 }
 
+func (b *Bot) sendShiftUpdatedMessage(
+	chatID int64,
+	shiftID int,
+	text string,
+) {
+	button := tgbotapi.NewInlineKeyboardButtonData(
+		"↩️ Вернуться к смене",
+		fmt.Sprintf("calendar:shift:%d", shiftID),
+	)
+
+	msg := tgbotapi.NewMessage(chatID, text)
+
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(button),
+	)
+
+	sent, err := b.api.Send(msg)
+	if err != nil {
+		log.Println("ошибка отправки результата редактирования:", err)
+		return
+	}
+
+	b.activeInlineMessages[chatID] = sent.MessageID
+}
+
 func (b *Bot) handleEditingStartTime(message *tgbotapi.Message) {
 	startTime, err := parseTime(message.Text)
 	if err != nil {
@@ -1854,15 +2003,25 @@ func (b *Bot) handleEditingStartTime(message *tgbotapi.Message) {
 		return
 	}
 
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		log.Println("ошибка загрузки часового пояса:", err)
+		return
+	}
+
+	// Получаем дату смены по времени Уфы.
+	shiftDate := oldShift.StartTime.In(loc)
+
+	// Объединяем дату смены с введённым временем.
 	state.StartTime = time.Date(
-		oldShift.StartTime.Year(),
-		oldShift.StartTime.Month(),
-		oldShift.StartTime.Day(),
+		shiftDate.Year(),
+		shiftDate.Month(),
+		shiftDate.Day(),
 		startTime.Hour(),
 		startTime.Minute(),
 		0,
 		0,
-		oldShift.StartTime.Location(),
+		loc,
 	)
 
 	state.Step = "editing_end_time"
@@ -1926,8 +2085,14 @@ func (b *Bot) handleEditingEndTime(message *tgbotapi.Message) {
 			message.Chat.ID,
 			"❌ Не удалось найти смену.",
 		)
-		msg.ReplyMarkup = mainKeyboard()
-		b.api.Send(msg)
+
+		b.sendShiftUpdatedMessage(
+			message.Chat.ID,
+			state.ShiftID,
+			msg.Text,
+		)
+
+		delete(b.userStates, message.Chat.ID)
 
 		delete(b.userStates, message.Chat.ID)
 		return
@@ -2109,9 +2274,13 @@ func (b *Bot) handleEditingBreak(message *tgbotapi.Message) {
 		),
 	)
 
-	msg.ReplyMarkup = mainKeyboard()
+	b.sendShiftUpdatedMessage(
+		message.Chat.ID,
+		state.ShiftID,
+		msg.Text,
+	)
 
-	b.api.Send(msg)
+	delete(b.userStates, message.Chat.ID)
 
 	delete(b.userStates, message.Chat.ID)
 }
@@ -2216,9 +2385,13 @@ func (b *Bot) handleEditingRate(message *tgbotapi.Message) {
 		),
 	)
 
-	msg.ReplyMarkup = mainKeyboard()
+	b.sendShiftUpdatedMessage(
+		message.Chat.ID,
+		state.ShiftID,
+		msg.Text,
+	)
 
-	b.api.Send(msg)
+	delete(b.userStates, message.Chat.ID)
 
 	delete(b.userStates, message.Chat.ID)
 }
@@ -2368,6 +2541,12 @@ func (b *Bot) handleExtraShift(
 			tgbotapi.NewInlineKeyboardButtonData(
 				mark(repository.ExtraDelivery)+"🚚 Доставка",
 				fmt.Sprintf("extra_toggle:%d:delivery", shiftID),
+			),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(
+				"◀️ Назад к смене",
+				fmt.Sprintf("calendar:shift:%d", shiftID),
 			),
 		),
 	)
