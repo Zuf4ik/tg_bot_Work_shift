@@ -213,16 +213,5 @@ func localTime(t time.Time) time.Time {
 		return t
 	}
 
-	// TIMESTAMP WITHOUT TIME ZONE хранит местное время.
-	// Поэтому сохраняем часы и минуты, а не переводим момент времени.
-	return time.Date(
-		t.Year(),
-		t.Month(),
-		t.Day(),
-		t.Hour(),
-		t.Minute(),
-		t.Second(),
-		t.Nanosecond(),
-		loc,
-	)
+	return t.In(loc)
 }

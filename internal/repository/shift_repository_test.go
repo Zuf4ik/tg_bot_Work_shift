@@ -6,38 +6,26 @@ import (
 )
 
 func TestLocalTime(t *testing.T) {
-	ufa, err := time.LoadLocation("Asia/Yekaterinburg")
-	if err != nil {
-		t.Fatal(err)
-	}
+	startUTC := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	endUTC := time.Date(2026, 11, 11, 16, 0, 0, 0, time.UTC)
 
-	// В PostgreSQL хранится TIMESTAMP WITHOUT TIME ZONE.
-	// Смена записана как 09:00–16:00 по времени Уфы.
-	//
-	// Имитируем чтение pgx, при котором время
-	// получено с Location UTC, но часы остались прежними.
-	savedStart := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
-	savedEnd := time.Date(2026, 11, 10, 16, 0, 0, 0, time.UTC)
+	start := localTime(startUTC)
+	end := localTime(endUTC)
 
-	restoredStart := localTime(savedStart)
-	restoredEnd := localTime(savedEnd)
-
-	// Проверяем, что локальные часы не изменились.
-	if restoredStart.Format("15:04") != "09:00" ||
-		restoredEnd.Format("15:04") != "16:00" {
+	if start.Format("15:04") != "14:00" ||
+		end.Format("15:04") != "21:00" {
 		t.Fatalf(
-			"ожидалось 09:00–16:00, получено %s–%s",
-			restoredStart.Format("15:04"),
-			restoredEnd.Format("15:04"),
+			"ожидалось 14:00–21:00, получено %s–%s",
+			start.Format("15:04"),
+			end.Format("15:04"),
 		)
 	}
 
-	// Проверяем, что восстановлен часовой пояс Уфы.
-	expectedStart := time.Date(2026, 11, 10, 9, 0, 0, 0, ufa)
-	expectedEnd := time.Date(2026, 11, 10, 16, 0, 0, 0, ufa)
+	if !start.Equal(startUTC) || !end.Equal(endUTC) {
+		t.Fatal("при преобразовании часового пояса изменился момент времени")
+	}
 
-	if !restoredStart.Equal(expectedStart) ||
-		!restoredEnd.Equal(expectedEnd) {
-		t.Fatal("неправильно восстановлен момент времени смены")
+	if start.Location().String() != "Asia/Yekaterinburg" {
+		t.Fatalf("неверный часовой пояс: %s", start.Location())
 	}
 }
