@@ -130,7 +130,7 @@ func (b *Bot) Start() {
 
 		if update.Message.Text == "📦 Дополнительные работы" {
 			b.resetUserFlow(update.Message.Chat.ID)
-			b.handleExtrasMenu(update.Message)
+			b.handleShiftCalendarForMode(update.Message, CalendarModeExtras)
 			continue
 		}
 
@@ -1291,9 +1291,13 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 
 		chatID := callback.Message.Chat.ID
 
-		activeID, exists := b.activeInlineMessages[chatID]
-		if !exists || activeID != callback.Message.MessageID {
+		if !b.isActiveInlineMessage(chatID, callback.Message.MessageID) {
 			b.answerCallback(callback.ID, "Меню устарело. Открой его заново.")
+			return
+		}
+
+		if callback.From.ID != chatID {
+			b.answerCallback(callback.ID, "Нет доступа")
 			return
 		}
 
@@ -1375,33 +1379,6 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		b.answerCallback(callback.ID, "Сохранено")
 
 		// Обновляем галочки в том же сообщении.
-		b.handleExtraShift(callback, shiftID)
-		return
-	}
-
-	if strings.HasPrefix(data, "extra_shift:") {
-		if callback.Message == nil {
-			b.answerCallback(callback.ID, "Сообщение недоступно")
-			return
-		}
-
-		chatID := callback.Message.Chat.ID
-
-		activeID, exists := b.activeInlineMessages[chatID]
-		if !exists || activeID != callback.Message.MessageID {
-			b.answerCallback(callback.ID, "Меню устарело. Открой его заново.")
-			return
-		}
-
-		shiftID, err := strconv.Atoi(
-			strings.TrimPrefix(data, "extra_shift:"),
-		)
-		if err != nil || shiftID <= 0 {
-			b.answerCallback(callback.ID, "Некорректный ID смены")
-			return
-		}
-
-		b.answerCallback(callback.ID, "")
 		b.handleExtraShift(callback, shiftID)
 		return
 	}
@@ -2396,73 +2373,6 @@ func (b *Bot) handleEditingRate(message *tgbotapi.Message) {
 	delete(b.userStates, message.Chat.ID)
 }
 
-func (b *Bot) handleExtrasMenu(message *tgbotapi.Message) {
-	chatID := message.Chat.ID
-
-	shifts, err := b.shiftService.GetShifts(
-		context.Background(),
-		chatID,
-	)
-	if err != nil {
-		log.Println("Ошибка получения смен:", err)
-		b.api.Send(tgbotapi.NewMessage(
-			chatID,
-			"❌ Не удалось загрузить смены.",
-		))
-		return
-	}
-
-	if len(shifts) == 0 {
-		b.api.Send(tgbotapi.NewMessage(
-			chatID,
-			"📋 У тебя пока нет сохранённых смен.",
-		))
-		return
-	}
-
-	text := "📦 Дополнительные работы\n\nВыбери смену:"
-
-	var rows [][]tgbotapi.InlineKeyboardButton
-
-	// Показываем не более 10 последних смен.
-	start := len(shifts) - 10
-	if start < 0 {
-		start = 0
-	}
-
-	for _, shift := range shifts[start:] {
-		label := fmt.Sprintf(
-			"📅 %s | %s–%s",
-			shift.StartTime.Format("02.01.2006"),
-			shift.StartTime.Format("15:04"),
-			shift.EndTime.Format("15:04"),
-		)
-
-		button := tgbotapi.NewInlineKeyboardButtonData(
-			label,
-			fmt.Sprintf("extra_shift:%d", shift.ID),
-		)
-
-		rows = append(
-			rows,
-			tgbotapi.NewInlineKeyboardRow(button),
-		)
-	}
-
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
-
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = keyboard
-
-	sent, err := b.api.Send(msg)
-	if err != nil {
-		log.Println("Ошибка отправки списка смен:", err)
-		return
-	}
-
-	b.activeInlineMessages[chatID] = sent.MessageID
-}
-
 func (b *Bot) handleExtraShift(
 	callback *tgbotapi.CallbackQuery,
 	shiftID int,
@@ -2579,7 +2489,16 @@ func (b *Bot) handleExtraShift(
 	}
 }
 
-func (b *Bot) handleShiftCalendar(message *tgbotapi.Message) {
+func (b *Bot) handleShiftCalendar(
+	message *tgbotapi.Message,
+) {
+	b.handleShiftCalendarForMode(message, CalendarModeShifts)
+}
+
+func (b *Bot) handleShiftCalendarForMode(
+	message *tgbotapi.Message,
+	mode CalendarMode,
+) {
 	loc, err := time.LoadLocation("Asia/Yekaterinburg")
 	if err != nil {
 		log.Println("ошибка загрузки часового пояса:", err)
@@ -2627,7 +2546,7 @@ func (b *Bot) handleShiftCalendar(message *tgbotapi.Message) {
 
 	busyDays := calendarBusyDaysFromShifts(shifts, month)
 
-	msg.ReplyMarkup = buildShiftCalendar(month, busyDays)
+	msg.ReplyMarkup = buildShiftCalendarForMode(month, busyDays, mode)
 
 	sent, err := b.api.Send(msg)
 	if err != nil {

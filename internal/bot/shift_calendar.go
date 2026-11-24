@@ -14,6 +14,13 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+type CalendarMode string
+
+const (
+	CalendarModeShifts CalendarMode = "shifts"
+	CalendarModeExtras CalendarMode = "extras"
+)
+
 func calendarMonthStart(date time.Time) time.Time {
 	return time.Date(
 		date.Year(),
@@ -24,9 +31,10 @@ func calendarMonthStart(date time.Time) time.Time {
 	)
 }
 
-func buildShiftCalendar(
+func buildShiftCalendarForMode(
 	date time.Time,
 	busyDays map[int]bool,
+	mode CalendarMode,
 ) tgbotapi.InlineKeyboardMarkup {
 	firstDay := calendarMonthStart(date)
 
@@ -77,7 +85,8 @@ func buildShiftCalendar(
 		)
 
 		callback := fmt.Sprintf(
-			"calendar:day:%s",
+			"calendar:%s:day:%s",
+			mode,
 			currentDate.Format("2006-01-02"),
 		)
 
@@ -145,6 +154,28 @@ func (b *Bot) handleShiftCalendarCallback(callback *tgbotapi.CallbackQuery) {
 	}
 
 	data := callback.Data
+
+	mode := CalendarModeShifts
+
+	switch {
+	case strings.HasPrefix(data, "calendar:extras:"):
+		mode = CalendarModeExtras
+		data = strings.Replace(
+			data,
+			"calendar:extras:",
+			"calendar:",
+			1,
+		)
+
+	case strings.HasPrefix(data, "calendar:shifts:"):
+		mode = CalendarModeShifts
+		data = strings.Replace(
+			data,
+			"calendar:shifts:",
+			"calendar:",
+			1,
+		)
+	}
 
 	if data == "calendar:noop" {
 		b.answerCallback(callback.ID, "")
@@ -276,7 +307,7 @@ func (b *Bot) handleShiftCalendarCallback(callback *tgbotapi.CallbackQuery) {
 		dayShifts := calendarShiftsForDay(shifts, date)
 
 		// Создаём кнопки для каждой найденной смены.
-		keyboard := buildCalendarDayKeyboard(date, dayShifts)
+		keyboard := buildCalendarDayKeyboardForMode(date, dayShifts, mode)
 
 		// Обновляем существующее сообщение.
 		edit := tgbotapi.NewEditMessageText(
@@ -393,7 +424,7 @@ func (b *Bot) handleShiftCalendarCallback(callback *tgbotapi.CallbackQuery) {
 	busyDays := calendarBusyDaysFromShifts(shifts, month)
 
 	// Создаём календарь с отметками рабочих дней.
-	keyboard := buildShiftCalendar(month, busyDays)
+	keyboard := buildShiftCalendarForMode(month, busyDays, mode)
 
 	edit := tgbotapi.NewEditMessageText(
 		chatID,
@@ -663,6 +694,14 @@ func buildCalendarDayKeyboard(
 	date time.Time,
 	shifts []model.Shift,
 ) tgbotapi.InlineKeyboardMarkup {
+	return buildCalendarDayKeyboardForMode(date, shifts, CalendarModeShifts)
+}
+
+func buildCalendarDayKeyboardForMode(
+	date time.Time,
+	shifts []model.Shift,
+	mode CalendarMode,
+) tgbotapi.InlineKeyboardMarkup {
 	var rows [][]tgbotapi.InlineKeyboardButton
 
 	// Создаём кнопку для каждой смены.
@@ -676,8 +715,15 @@ func buildCalendarDayKeyboard(
 			end.Format("15:04"),
 		)
 
+		callbackType := "shift"
+
+		if mode == CalendarModeExtras {
+			callbackType = "extra"
+		}
+
 		callback := fmt.Sprintf(
-			"calendar:shift:%d",
+			"calendar:%s:%d",
+			callbackType,
 			shift.ID,
 		)
 
@@ -692,21 +738,26 @@ func buildCalendarDayKeyboard(
 		)
 	}
 
-	// Добавление новой смены.
-	addButton := tgbotapi.NewInlineKeyboardButtonData(
-		"➕ Добавить смену",
-		"calendar:add:"+date.Format("2006-01-02"),
-	)
+	if mode == CalendarModeShifts {
+		addButton := tgbotapi.NewInlineKeyboardButtonData(
+			"➕ Добавить смену",
+			"calendar:add:"+date.Format("2006-01-02"),
+		)
 
-	rows = append(
-		rows,
-		tgbotapi.NewInlineKeyboardRow(addButton),
-	)
+		rows = append(
+			rows,
+			tgbotapi.NewInlineKeyboardRow(addButton),
+		)
+	}
 
 	// Возврат к календарю.
 	backButton := tgbotapi.NewInlineKeyboardButtonData(
 		"◀️ Назад к календарю",
-		"calendar:month:"+date.Format("2006-01"),
+		fmt.Sprintf(
+			"calendar:%s:month:%s",
+			mode,
+			date.Format("2006-01"),
+		),
 	)
 
 	rows = append(

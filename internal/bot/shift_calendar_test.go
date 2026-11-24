@@ -2,6 +2,7 @@ package bot
 
 import (
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"tg_bot/internal/repository"
@@ -339,7 +340,7 @@ func TestBuildCalendarDayKeyboard(t *testing.T) {
 		"calendar:shift:10",
 		"calendar:shift:20",
 		"calendar:add:2026-11-12",
-		"calendar:month:2026-11",
+		"calendar:shifts:month:2026-11",
 	}
 
 	if len(keyboard.InlineKeyboard) != len(expectedCallbacks) {
@@ -473,5 +474,51 @@ func TestFormatCalendarShift(t *testing.T) {
 				result,
 			)
 		}
+	}
+}
+
+func TestBuildCalendarDayKeyboardExtras(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	date := time.Date(2026, 11, 20, 0, 0, 0, 0, loc)
+
+	shifts := []model.Shift{
+		{
+			ID:        125,
+			StartTime: date.Add(16 * time.Hour),
+			EndTime:   date.Add(24 * time.Hour),
+		},
+	}
+
+	keyboard := buildCalendarDayKeyboardForMode(
+		date,
+		shifts,
+		CalendarModeExtras,
+	)
+
+	var callbacks []string
+
+	for _, row := range keyboard.InlineKeyboard {
+		for _, button := range row {
+			if button.CallbackData != nil {
+				callbacks = append(callbacks, *button.CallbackData)
+			}
+		}
+	}
+
+	expected := []string{
+		"calendar:extra:125",
+		"calendar:extras:month:2026-11",
+	}
+
+	if !reflect.DeepEqual(callbacks, expected) {
+		t.Fatalf(
+			"ожидались callback %v, получены %v",
+			expected,
+			callbacks,
+		)
 	}
 }
