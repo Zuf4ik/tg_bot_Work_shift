@@ -75,7 +75,6 @@ func (r *ShiftRepository) GetShifts(
 	}
 	defer rows.Close()
 
-	//var shifts []model.Shift
 	shifts := make([]model.Shift, 0)
 
 	for rows.Next() {
@@ -91,13 +90,12 @@ func (r *ShiftRepository) GetShifts(
 			&shift.HourlyRate,
 		)
 
-		shift.StartTime = localTime(shift.StartTime)
-		shift.EndTime = localTime(shift.EndTime)
-
 		if err != nil {
 			return nil, err
 		}
 
+		shift.StartTime = localTime(shift.StartTime)
+		shift.EndTime = localTime(shift.EndTime)
 		shift.Break = time.Duration(breakMinutes) * time.Minute
 
 		shifts = append(shifts, shift)
@@ -120,14 +118,19 @@ func (r *ShiftRepository) DeleteShift(
 		WHERE id = $1 AND telegram_id = $2
 	`
 
-	_, err := r.db.Exec(
+	result, err := r.db.Exec(
 		ctx,
 		query,
 		id,
 		telegramID,
 	)
-
-	return err
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("смена не найдена или не принадлежит пользователю")
+	}
+	return nil
 }
 
 func (r *ShiftRepository) UpdateShift(

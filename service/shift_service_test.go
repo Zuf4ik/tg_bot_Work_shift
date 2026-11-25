@@ -297,3 +297,32 @@ func TestCalculateSalaryFullNight(t *testing.T) {
 		)
 	}
 }
+
+func TestCalculateHoursRejectsNegativeBreak(t *testing.T) {
+	shift := model.Shift{
+		StartTime: time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC),
+		EndTime:   time.Date(2026, 11, 20, 17, 0, 0, 0, time.UTC),
+		Break:     -15 * time.Minute,
+	}
+	if _, err := CalculateHours(shift); err == nil {
+		t.Fatal("отрицательный перерыв должен отклоняться")
+	}
+}
+
+func TestCalculateHoursRejectsZeroDuration(t *testing.T) {
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	shift := model.Shift{StartTime: at, EndTime: at}
+	if _, err := CalculateHours(shift); err == nil {
+		t.Fatal("нулевая длительность смены должна отклоняться")
+	}
+}
+
+func TestCalculateSalaryRejectsNonFiniteRate(t *testing.T) {
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	for _, rate := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		shift := model.Shift{StartTime: at, EndTime: at.Add(8 * time.Hour), HourlyRate: rate}
+		if _, err := CalculateSalary(shift); err == nil {
+			t.Errorf("неконечная ставка %v должна отклоняться", rate)
+		}
+	}
+}

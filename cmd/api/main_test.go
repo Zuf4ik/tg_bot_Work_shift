@@ -35,3 +35,30 @@ func TestParseShiftTime(t *testing.T) {
 		)
 	}
 }
+
+func TestValidateShiftInput(t *testing.T) {
+	valid := createShiftRequest{TelegramID: 123, BreakMinutes: 30, HourlyRate: 250}
+	if err := validateShiftInput(valid, true); err != nil {
+		t.Fatalf("корректные данные отклонены: %v", err)
+	}
+	invalid := []struct {
+		name string
+		req  createShiftRequest
+	}{
+		{"Отсутствует TelegramID", createShiftRequest{BreakMinutes: 30, HourlyRate: 250}},
+		{"Отрицательный перерыв", createShiftRequest{TelegramID: 123, BreakMinutes: -1, HourlyRate: 250}},
+		{"Слишком длинный перерыв", createShiftRequest{TelegramID: 123, BreakMinutes: 361, HourlyRate: 250}},
+		{"Отсутствует ставка", createShiftRequest{TelegramID: 123, BreakMinutes: 30}},
+		{"Ставка выше лимита", createShiftRequest{TelegramID: 123, BreakMinutes: 30, HourlyRate: 10001}},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateShiftInput(test.req, true); err == nil {
+				t.Fatal("ожидалась ошибка валидации")
+			}
+		})
+	}
+	if err := validateShiftInput(createShiftRequest{BreakMinutes: 0, HourlyRate: 250}, false); err != nil {
+		t.Fatalf("PUT должен брать telegram_id из параметра запроса: %v", err)
+	}
+}

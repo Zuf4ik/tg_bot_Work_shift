@@ -522,3 +522,71 @@ func TestBuildCalendarDayKeyboardExtras(t *testing.T) {
 		)
 	}
 }
+
+func TestCalendarMonthNavigationPreservesMode(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	month := time.Date(2026, time.November, 1, 0, 0, 0, 0, loc)
+
+	modes := []CalendarMode{
+		CalendarModeShifts,
+		CalendarModeExtras,
+		CalendarModeAdd,
+		CalendarModeEdit,
+		CalendarModeDelete,
+	}
+
+	for _, mode := range modes {
+		t.Run(string(mode), func(t *testing.T) {
+			keyboard := buildShiftCalendarForMode(month, nil, mode)
+			if len(keyboard.InlineKeyboard) == 0 {
+				t.Fatal("календарь не содержит кнопок")
+			}
+			lastRow := keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1]
+			if len(lastRow) != 2 {
+				t.Fatalf("ожидалось 2 кнопки навигации, получено %d", len(lastRow))
+			}
+			expected := []string{
+				"calendar:" + string(mode) + ":month:2026-10",
+				"calendar:" + string(mode) + ":month:2026-12",
+			}
+			for i, button := range lastRow {
+				if button.CallbackData == nil || *button.CallbackData != expected[i] {
+					t.Errorf("кнопка %d: ожидалось %q, получено %v", i, expected[i], button.CallbackData)
+				}
+			}
+		})
+	}
+}
+
+func TestCalendarDayActionsPreservePurpose(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Yekaterinburg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	date := time.Date(2026, time.November, 20, 0, 0, 0, 0, loc)
+	shifts := []model.Shift{{ID: 42, StartTime: date.Add(9 * time.Hour), EndTime: date.Add(16 * time.Hour)}}
+	cases := []struct {
+		mode     CalendarMode
+		callback string
+	}{
+		{CalendarModeExtras, "calendar:extra:42"},
+		{CalendarModeEdit, "edit_shift:42"},
+		{CalendarModeDelete, "confirm_delete:42"},
+		{CalendarModeShifts, "calendar:shift:42"},
+	}
+	for _, tt := range cases {
+		t.Run(string(tt.mode), func(t *testing.T) {
+			keyboard := buildCalendarDayKeyboardForMode(date, shifts, tt.mode)
+			if len(keyboard.InlineKeyboard) == 0 || len(keyboard.InlineKeyboard[0]) != 1 {
+				t.Fatal("отсутствует кнопка выбора смены")
+			}
+			button := keyboard.InlineKeyboard[0][0]
+			if button.CallbackData == nil || *button.CallbackData != tt.callback {
+				t.Errorf("ожидалось %q, получено %v", tt.callback, button.CallbackData)
+			}
+		})
+	}
+}

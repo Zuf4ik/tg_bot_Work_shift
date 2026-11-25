@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -20,6 +22,21 @@ type createShiftRequest struct {
 	EndTime      string  `json:"end_time"`
 	BreakMinutes int     `json:"break_minutes"`
 	HourlyRate   float64 `json:"hourly_rate"`
+}
+
+// validateShiftInput отсекает заведомо неверные поля до обращения к БД.
+// Для PUT идентификатор пользователя берётся из query-параметра, а не из тела.
+func validateShiftInput(req createShiftRequest, requireTelegramID bool) error {
+	if requireTelegramID && req.TelegramID <= 0 {
+		return fmt.Errorf("telegram_id must be positive")
+	}
+	if req.BreakMinutes < 0 || req.BreakMinutes > 360 {
+		return fmt.Errorf("break_minutes must be between 0 and 360")
+	}
+	if math.IsNaN(req.HourlyRate) || math.IsInf(req.HourlyRate, 0) || req.HourlyRate <= 0 || req.HourlyRate > 10000 {
+		return fmt.Errorf("hourly_rate must be between 0 (exclusive) and 10000")
+	}
+	return nil
 }
 
 func main() {
@@ -104,7 +121,7 @@ func getShiftsHandler(shiftService *service.ShiftService) http.HandlerFunc {
 		}
 
 		telegramID, err := strconv.ParseInt(telegramIDText, 10, 64)
-		if err != nil {
+		if err != nil || telegramID <= 0 {
 			http.Error(w, "invalid telegram_id", http.StatusBadRequest)
 			return
 		}
@@ -136,7 +153,7 @@ func getShiftByIDHandler(shiftService *service.ShiftService) http.HandlerFunc {
 		}
 
 		telegramID, err := strconv.ParseInt(telegramIDText, 10, 64)
-		if err != nil {
+		if err != nil || telegramID <= 0 {
 			http.Error(w, "invalid telegram_id", http.StatusBadRequest)
 			return
 		}
@@ -144,7 +161,7 @@ func getShiftByIDHandler(shiftService *service.ShiftService) http.HandlerFunc {
 		shiftIDText := r.PathValue("id")
 
 		shiftID, err := strconv.Atoi(shiftIDText)
-		if err != nil {
+		if err != nil || shiftID <= 0 {
 			http.Error(w, "invalid shift id", http.StatusBadRequest)
 			return
 		}
@@ -178,13 +195,13 @@ func updateShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 		}
 
 		telegramID, err := strconv.ParseInt(telegramIDText, 10, 64)
-		if err != nil {
+		if err != nil || telegramID <= 0 {
 			http.Error(w, "invalid telegram_id", http.StatusBadRequest)
 			return
 		}
 
 		shiftID, err := strconv.Atoi(r.PathValue("id"))
-		if err != nil {
+		if err != nil || shiftID <= 0 {
 			http.Error(w, "invalid shift id", http.StatusBadRequest)
 			return
 		}
@@ -195,6 +212,11 @@ func updateShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if err := validateShiftInput(req, false); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -265,6 +287,11 @@ func createShiftHandler(shiftService *service.ShiftService) http.HandlerFunc {
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if err := validateShiftInput(req, true); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 

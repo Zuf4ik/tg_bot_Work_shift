@@ -87,9 +87,6 @@ func main() {
 	shiftService := service.NewShiftService(shiftRepo)
 	salaryService := service.NewSalaryService(calendarRepo)
 
-	// Пока SalaryService не подключён к обработчикам Telegram.
-	// На следующем этапе передадим его в botservice.New.
-
 	bot := botservice.New(api, userRepo, shiftService, salaryService, extraRepo)
 	bot.Start()
 }

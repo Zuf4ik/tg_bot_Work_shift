@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"tg_bot/internal/repository"
@@ -10,8 +11,11 @@ import (
 )
 
 func CalculateHours(shift model.Shift) (float64, error) {
-	if shift.EndTime.Before(shift.StartTime) {
-		return 0, errors.New("время окончания раньше времени начала")
+	if !shift.EndTime.After(shift.StartTime) {
+		return 0, errors.New("время окончания должно быть позже времени начала")
+	}
+	if shift.Break < 0 {
+		return 0, errors.New("перерыв не может быть отрицательным")
 	}
 
 	duration := shift.EndTime.Sub(shift.StartTime) - shift.Break
@@ -28,6 +32,9 @@ func CalculateSalary(shift model.Shift) (float64, error) {
 		return 0, errors.New("время окончания раньше времени начала")
 	}
 
+	if math.IsNaN(shift.HourlyRate) || math.IsInf(shift.HourlyRate, 0) {
+		return 0, errors.New("ставка должна быть конечным числом")
+	}
 	if shift.HourlyRate < 0 {
 		return 0, errors.New("ставка не может быть отрицательной")
 	}
